@@ -1,11 +1,18 @@
 # Caliper-GPU-version
 
+## News features:
+* No more Huge Thermal configuration file
+* GPU accelerated version 
+  
+## Caliper CPU args:
 
-## BENCHMARK FILE FORMAT:
+## Caliper GPU args:
 
-[Row][Col][MinCore][InitWorkload]
+## Result FILE FORMAT:
+
+[Row][Col][MinCore][InitWorkload]\
 ExecutionTime
-MTTF
-Mean
-Variance
+MTTF\
+Mean\
+Variance\
 Confidence
