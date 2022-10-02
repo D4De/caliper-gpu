@@ -17,14 +17,40 @@ CALIPER_GPU_OBJ=$(CALIPER_GPU_SRC:src/%.cpp=$(GPU_BUILD_PATH)/%.o)
 CALIPER_CPU_EX=caliper
 CALIPER_GPU_EX=caliper_gpu
 
+#PATH TO CUDA INSTALLATION FOLDER
+CUDA_PATH = /usr/local/cuda-11.6
+#CUDA STANDARD LIBRARY PATH
+CUDA_INC = $(CUDA_PATH)/include
+#If using on terminal NVCC can be replaced with nvcc directly without path
+NVCC = $(CUDA_PATH)/bin/nvcc
+NVPROF = $(CUDA_PATH)/bin/nvprof
+
+#C or C++ compiler
+GCC = g++
+#All compilation flag must be placed here
+FLAGS =
+#GPU CAPABILITY: the capability is a version number composed like X.X (eg 5.0 or 6.1 )
+#You can find capability of device on https://developer.nvidia.com/cuda-gpus#compute
+#IN THE FOLLOWING FIELD REPLACE 50 with your GPU capability without the "." so X.X become XX
+#eg: 5.0 -> 50 , 6.1->60 , 7.5 -> 75
+CAPABILITY = 50
+#THE CODE IS EQUAL TO THE ARCHITECTURE CAPABILITY SO MY IS 5.0 so sm_50 and compute_50
+#GENERATING ARCHITECTURE FLAGS--------------- TODO AUTOMATIZE
+CODE = code=sm_$(CAPABILITY)
+ARCH = arch=compute_$(CAPABILITY)
+ARCHITECTURE_FLAG = $(ARCH),$(CODE)
+
+
 #----------------------------------------
 #--------MAKEFILE COMMANDS---------------
 #----------------------------------------
 
-all: $(CALIPER_CPU_EX) 
-gpu: $(CALIPER_GPU_EX)
-cpu: $(CALIPER_EX)
-
+all: cpu #gpu
+#gpu: $(CALIPER_GPU_EX)
+cpu: $(CALIPER_CPU_EX)
+gpu:
+	nvcc -m64 -gencode $(ARCHITECTURE_FLAG) -o gpu_exec ./src/caliper_gpu.cu
+	
 buid_folders:
 	mkdir -p $(CPU_BUILD_PATH)
 
@@ -33,9 +59,9 @@ $(CALIPER_CPU_EX): buid_folders $(CALIPER_OBJ)
 	$(CXX) $(CALIPER_OBJ) $(LDFLAGS) -o $@
 	#------END   Caliper CPU build------
 
-$(CALIPER_GPU_EX): $(CALIPER_GPU_OBJ)  
+$(CALIPER_GPU_EX): buid_folders $(CALIPER_GPU_OBJ)  
 	#------START Caliper GPU build------
-	$(CXX) $(THERMAL_OBJ) $(LDFLAGS) -o $@
+	$(NVCC) $(CALIPER_GPU_OBJ) -m64  -gencode $(ARCHITECTURE_FLAG)  -o $@
 	#------END   Caliper GPU build------
 
 $(CALIPER_OBJ) : $(CALIPER_SRC)
@@ -44,6 +70,6 @@ $(CALIPER_OBJ) : $(CALIPER_SRC)
 
 .cpp .o:
 	$(CXX) $(CFLAGS) $< -o $@
-	
+
 clean:
 	rm -rf src/*.o $(CALIPER_EX) $(THERMAL_EX) 

@@ -14,10 +14,12 @@ Neither the name of Politecnico di Milano nor the names of its contributors may 
 
 
 //CUSTOM HEADERS:
-#include "./thermal_model.h"
-#include "./benchmark_helper.h"
-#include "./utils.h"
 
+#include "thermal_model.h"
+#include "utils.h"
+#include "benchmark_helper.h"
+
+#define BLOCK_DIM 128
 
 int main(int argc, char* argv[]) {
     int left_cores, min_cores = 0, tmp_min_cores, max_cores;
@@ -25,13 +27,14 @@ int main(int argc, char* argv[]) {
     std::map<double, double> results;
     int i;
 
+    bool isGPU = false;
     char* outputfilename = NULL;
     bool numTest = false;
 
     unsigned short randomSeed[3] = { 0, 0, 0 };
     double confInt = 0, thr = 0;
     
-    int rows, cols;
+    int cols,rows;
     double wl;
     double *loads;
     double *temps;
@@ -39,20 +42,20 @@ int main(int argc, char* argv[]) {
     //TODO Inizialize Loads using params from user
 
     //-------------------------------------------------
-    //----Allocate Memory----------------------
-    //-------------------------------------------------
-    loads = (double*) malloc(sizeof(double)* ROWS * COLS);
-    temps = (double*) malloc(sizeof(double)* ROWS * COLS);
-
-    //-------------------------------------------------
     //----parsing input arguments----------------------
     //-------------------------------------------------
-    rows = atoi(argv[1]);
-    cols = atoi(argv[2]);
-    min_cores = atoi(argv[3]);
-    max_cores = rows * cols;
-    wl = atof(argv[4]);
-    outputfilename = argv[5];
+    rows            = atoi(argv[1]);
+    cols            = atoi(argv[2]);
+    min_cores       = atoi(argv[3]);
+    max_cores       = rows * cols;
+    wl              = atof(argv[4]);
+    //outputfilename  = argv[5];
+    
+    //-------------------------------------------------
+    //----Allocate Memory------------------------------
+    //-------------------------------------------------
+    loads = (double*) malloc(sizeof(double)* rows * cols);
+    temps = (double*) malloc(sizeof(double)* rows * cols);
 
     benchmark_results benchmark(rows,cols,min_cores,wl);
     benchmark_timer timer = benchmark_timer();
@@ -93,6 +96,7 @@ int main(int argc, char* argv[]) {
     double ciSize = 0; // current size of the confidence interval
     double mean;   // current mean of the distribution
     double var;	   // current variance of the distribution
+
 
     //------------------------------------------------------------------------------
     //----------Run Monte Carlo Simulation------------------------------------------
@@ -207,8 +211,9 @@ int main(int argc, char* argv[]) {
         var = sumTTFX2 / (double) (i) - mean * mean;
         ciSize = Zinv * sqrt(var / (double) (i + 1));
     }
+     timer.stop();
 
-    timer.stop();
+   
     //------------------------------------------------------------------------------
     //---------Display Results------------------------------------------------------
     //------------------------------------------------------------------------------
@@ -233,7 +238,7 @@ int main(int argc, char* argv[]) {
         outfile.close();
     }
 
-
+    std::cout << "SumTTF: " <<sumTTF<< std::endl;
     std::cout << "MTTF: " << mttf_int << " (years: " << (mttf_int / (24 * 365)) << ") " << mttf_int1 << std::endl;
     std::cout << "Exec time: " << ((double) timer.getTime())<< std::endl;
     std::cout << "Number of tests performed: " << num_of_tests << std::endl;

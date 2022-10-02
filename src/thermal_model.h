@@ -1,3 +1,4 @@
+//#include "cuda_helper.h"
 #define ROWS 5
 #define COLS 5
 
@@ -17,7 +18,7 @@
 
 #define getAlpha(temp) ((CONST_A0 * (pow(CONST_JMJCRIT,(-CONST_N))) * exp(ACTIVATIONENERGY / (BOLTZMANCONSTANT * temp))) / CONST_ERRF)
 
-#define NTESTS 100000
+#define NTESTS 100000 //With 100k more the result converge
 #define BETA 2
 #define MIN_NUM_OF_TRIALS 30
 
@@ -25,8 +26,6 @@
 
 // Support function to allow arbitrary confidence intervals
 #define INV_ERF_ACCURACY 10e-6
-
-void tempModel(double loads[][COLS], double temps[][COLS]);
 
 void tempModel(double *loads, double* temps, int rows, int cols) {
     double temp;

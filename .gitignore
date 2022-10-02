@@ -1,5 +1,6 @@
 ./build
 caliper
+gpu_exec
 caliper_gpu
 *.o
 benchmark*

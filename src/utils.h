@@ -11,6 +11,7 @@
 #include <getopt.h>
 #include <set>
 #include <unistd.h>
+#include "cuda_helper.h"
 
 
 #define EMPTY_SET "#"
