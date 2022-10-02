@@ -12,74 +12,18 @@ Neither the name of Politecnico di Milano nor the names of its contributors may 
  This code implements the R/MTTF computation for a K-out-of-N system by means of Monte Carlo simulations, for the CALIPER framework
  */
 
-#include <iostream>
-#include <string>
-#include <cmath>
-#include <iomanip>
-#include <map>
-#include <cstdlib>
-#include <vector>
-#include <fstream>
-#include <cstring>
-#include <sstream>
-#include <getopt.h>
-#include <set>
-#include <unistd.h>
-
-#define EMPTY_SET "#"
-#define MAKE_STRING( msg )  ( ((std::ostringstream&)((std::ostringstream() << '\x0') << msg)).str().substr(1) )
 
 //CUSTOM HEADERS:
 #include "./thermal_model.h"
 #include "./benchmark_helper.h"
+#include "./utils.h"
 
-double invErf(double f) {
-// inverts the gaussian distribution N(0,1) using the bisection method
-    double l = 0;
-    double r = 1;
-    double vl, vr, h, vh;
-
-    // first iteration: find a v, such that N(v) > f
-    while ((erf(r / M_SQRT2) + 1.0) / 2.0 < f) {
-        r *= 2;
-    }
-
-    // solves the equation iteratively
-    vl = (erf(l / M_SQRT2) + 1.0) / 2.0 - f;
-    vr = (erf(r / M_SQRT2) + 1.0) / 2.0 - f;
-    h = (l + r) / 2;
-    while (fabs(r - l) / h > INV_ERF_ACCURACY) {
-        vh = (erf(h / M_SQRT2) + 1.0) / 2.0 - f;
-        if (vh * vl < 0.0) {
-            r = h;
-            vr = vh;
-        } else {
-            l = h;
-            vl = vh;
-        }
-        h = (l + r) / 2;
-    }
-
-    return h;
-}
-
-double round1(double n){
-	int k = 0;
-	while(n<100000){
-		k++;
-		n *= 10.0;
-	}
-	n = round(n);
-	n /= pow(10, k);
-	return n;
-}
 
 int main(int argc, char* argv[]) {
     int left_cores, min_cores = 0, tmp_min_cores, max_cores;
     long num_of_tests = NTESTS;
     std::map<double, double> results;
     int i;
-    time_t t_setup, t_start, t_end;
 
     char* outputfilename = NULL;
     bool numTest = false;
@@ -89,13 +33,20 @@ int main(int argc, char* argv[]) {
     
     int rows, cols;
     double wl;
-    double loads[ROWS][COLS];
-    double temps[ROWS][COLS];
+    double *loads;
+    double *temps;
 
-    ////////////////////////////////////////////////////////////////////////////////
-    //parsing input arguments
-    ////////////////////////////////////////////////////////////////////////////////
-    
+    //TODO Inizialize Loads using params from user
+
+    //-------------------------------------------------
+    //----Allocate Memory----------------------
+    //-------------------------------------------------
+    loads = (double*) malloc(sizeof(double)* ROWS * COLS);
+    temps = (double*) malloc(sizeof(double)* ROWS * COLS);
+
+    //-------------------------------------------------
+    //----parsing input arguments----------------------
+    //-------------------------------------------------
     rows = atoi(argv[1]);
     cols = atoi(argv[2]);
     min_cores = atoi(argv[3]);
@@ -105,9 +56,11 @@ int main(int argc, char* argv[]) {
 
     benchmark_results benchmark(rows,cols,min_cores,wl);
     benchmark_timer timer = benchmark_timer();
-    //TODO CHECK QOS TO PREVENT BAD SIMULATION  
-	
-	//???
+
+	//-------------------------------------------------
+    //-----Check QUOS constraint-----------------------
+    //-------------------------------------------------
+
     //check both stopping threshold and confidence interval are set if 1 is false
     if (!numTest && (confInt == 0 || thr == 0)) {
         if (!(confInt == 0 && thr == 0)) {
@@ -118,11 +71,9 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    ////////////////////////////////////////////////////////////////////////////////
-    //set up environment
-    ////////////////////////////////////////////////////////////////////////////////
-
-    t_start = time(NULL);
+    //-------------------------------------------------
+    //-----set up environment--------------------------
+    //-------------------------------------------------
     //set seed
     seed48(randomSeed);
     //set output precision
@@ -135,8 +86,6 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    t_setup = time(NULL);
-
     // confidence interval set up
     double Zinv = invErf(0.5 + confInt / 100.0 / 2);
     double ht = thr / 100.0 / 2; // half of the threshold
@@ -145,99 +94,101 @@ int main(int argc, char* argv[]) {
     double mean;   // current mean of the distribution
     double var;	   // current variance of the distribution
 
-    ////////////////////////////////////////////////////////////////////////////////
-    //run Monte Carlo simulation
-    ////////////////////////////////////////////////////////////////////////////////
-    //for (i = 0, sumTTF = 0; i < num_of_tests; i++) {
+    //------------------------------------------------------------------------------
+    //----------Run Monte Carlo Simulation------------------------------------------
+    //------------------------------------------------------------------------------
     //when using the confidence interval, we want to execute at least MIN_NUM_OF_TRIALS
     timer.start();
     for (i = 0; (numTest && (i < num_of_tests)) || (!numTest && ((i < MIN_NUM_OF_TRIALS) || (ciSize / mean > ht))); i++) {
-        //std::cerr << i << std::endl;
         double random;
-        std::vector<double> currR;
+        double* currR;
         double stepT;
         std::string currConf;
         int minIndex;
         double totalTime;
-        std::vector<bool> alives;
+        bool* alives;
         int j;
         double t, eqT;
 
-        // experiment initialization
+    //-----------EXPERIMENT INITIALIZATION----------
         left_cores = max_cores;
         totalTime = 0;
         minIndex = 0;
         currConf = EMPTY_SET;
-        currR.clear();
-        alives.clear();
+        //Arrays Allocation:
+        currR  = (double*) malloc(sizeof(double)*max_cores);
+        alives = (bool*)   malloc(sizeof(bool)*max_cores);
+        //Arrays Initialization:
         for (j = 0; j < max_cores; j++) {
-            currR.push_back(1.0);
-            alives.push_back(true);
+            currR[j]  = 1;
+            alives[j] = true;
         }
 
-        //run current experiment
+    //-----------RUN CURRENT EXPERIMENT----------
+    //THIS CYCLE generate failure times for alive cores and find the shortest one  
         while (left_cores >= min_cores) {
-            // generate failure times for alive cores and find the shortest one
-            minIndex = -1;
-
-            //generate temperatures for each of the alive cores
+        //Initialize Minimum index
+          minIndex = -1;
+        //-----------Redistribute Loads among alive cores----------
             double distributedLoad = wl * max_cores / left_cores;
-            //std::cerr << *setIt << "-" << wl << "-" << distributedLoad;
+
             for (int i = 0, k = 0; i < rows; i++) {
                 for (int j = 0; j < cols; j++) {
                     if (alives[i*cols+j] == true) {
-                        loads[i][j] = distributedLoad;
+                        loads[i*cols+j] = distributedLoad;
                     } else {
-                        loads[i][j] = 0;
+                        loads[i*cols+j] = 0;
                     }
-                    //std::cerr << " " << loads[i][j];
                     k++;
                 }
             }
+
+        //-----------Compute Temperatures of each core based on loads----
             
-	    tempModel(loads, temps, rows, cols);
+	        tempModel(loads, temps, rows, cols);
             
+        //-----------Random Walk Step computation-------------------------
             for (j = 0; j < max_cores; j++) {
                 if (alives[j] == true) {
                     random = (double) drand48() * currR[j]; //current core will potentially die when its R will be equal to random. drand48() generates a number in the interval [0.0;1.0)
-                    double alpha = getAlpha(temps[j/cols][j%cols]);
+                    double alpha = getAlpha(temps[j]);
                     double alpha_rounded = round1(alpha);
-                        t = alpha_rounded * pow(-log(random), (double) 1 / BETA); //elapsed time from 0 to obtain the new R value equal to random
-                        std::cout << alpha_rounded << std::endl;
-                        eqT = alpha_rounded * pow(-log(currR[j]), (double) 1 / BETA); //elapsed time from 0 to obtain the previous R value
-                        //the difference between the two values represents the time elapsed from the previous failure to the current failure
-                        //(we will sum to the total time the minimum of such values)
-                        t = t - eqT;
-                    //std::cerr << j << " R " << random << " " << t << std::endl;
+                    t = alpha_rounded * pow(-log(random), (double) 1 / BETA); //elapsed time from 0 to obtain the new R value equal to random
+                    eqT = alpha_rounded * pow(-log(currR[j]), (double) 1 / BETA); //elapsed time from 0 to obtain the previous R value
+                    t = t - eqT;
+                    //the difference between the two values represents the time elapsed from the previous failure to the current failure
+                    //(we will sum to the total time the minimum of such values)
+                    
                     if (minIndex == -1 || (minIndex != -1 && t < stepT)) {
-                        minIndex = j;
-                        stepT = t;
+                        minIndex = j;//Set new minimum index
+                        stepT = t;   //set new minimum time as timeStep
                     } //TODO ADD A CHECK ON MULTIPLE FAILURE IN THE SAME INSTANT OF TIME.
                 }
             }
+        //-------Check if No failed core founded-----------
             if (minIndex == -1) {
                 std::cerr << "Failing cores not found" << std::endl;
                 return 1;
             }
 
+        //---------UPDATE TOTAL TIME----------------- 
             // update total time by using equivalent time according to the R for the core that is dying
             //stepT is the time starting from 0 to obtain the R value when the core is dead with the current load
             //eqT is the time starting from 0 to obtain the previous R value with the current load
             //thus the absolute totalTime when the core is dead is equal to the previous totalTime + the difference between stepT and eqT
             //geometrically we translate the R given the current load to right in order to intersect the previous R curve in the previous totalTime
-            totalTime = totalTime + stepT;
+            totalTime = totalTime + stepT; //Current simulation time
 
-            // update configuration
+        //---------UPDATE Configuration----------------- 
             if (left_cores > min_cores) {
                 alives[minIndex] = false;
                 // compute remaining reliability for working cores
                 for (j = 0; j < max_cores; j++) {
                     if (alives[j]) {
-                    		double alpha = getAlpha(temps[j/cols][j%cols]);
+                    		double alpha = getAlpha(temps[j]);
                     		double alpha_rounded = round1(alpha);
                             eqT = alpha_rounded * pow(-log(currR[j]), (double) 1 / BETA); //TODO: fixed a buf. we have to use the eqT of the current unit and not the one of the failed unit
                             currR[j] = exp(-pow((stepT + eqT) / alpha_rounded, BETA));
-                            //std::cerr << "updR " << left_cores << " " << totalTime << " " << j << " " << currR[j] << std::endl;
                     }
                 }
                 if (currConf == EMPTY_SET)
@@ -248,8 +199,8 @@ int main(int argc, char* argv[]) {
             left_cores--;
             
         }
-        // updates stats
-        results[totalTime]++;
+    //---------UPDATE Stats----------------- 
+        results[totalTime]++; //
         sumTTF += totalTime;
         sumTTFX2 += totalTime * totalTime;
         mean = sumTTF / (double) (i + 1); //do consider that i is incremented later
@@ -258,9 +209,9 @@ int main(int argc, char* argv[]) {
     }
 
     timer.stop();
-    ////////////////////////////////////////////////////////////////////////////////
-    //display results
-    ////////////////////////////////////////////////////////////////////////////////
+    //------------------------------------------------------------------------------
+    //---------Display Results------------------------------------------------------
+    //------------------------------------------------------------------------------
     if (!numTest)
         num_of_tests = i;
     double curr_alives = num_of_tests;
@@ -282,7 +233,6 @@ int main(int argc, char* argv[]) {
         outfile.close();
     }
 
-    t_end = time(NULL);
 
     std::cout << "MTTF: " << mttf_int << " (years: " << (mttf_int / (24 * 365)) << ") " << mttf_int1 << std::endl;
     std::cout << "Exec time: " << ((double) timer.getTime())<< std::endl;

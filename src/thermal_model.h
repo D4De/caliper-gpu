@@ -28,7 +28,7 @@
 
 void tempModel(double loads[][COLS], double temps[][COLS]);
 
-void tempModel(double loads[][COLS], double temps[][COLS], int rows, int cols) {
+void tempModel(double *loads, double* temps, int rows, int cols) {
     double temp;
     int i, j, k, h;
     for (i = 0; i < rows; i++)
@@ -36,8 +36,8 @@ void tempModel(double loads[][COLS], double temps[][COLS], int rows, int cols) {
             for (k = -1, temp = 0; k < 2; k++)
                 for (h = -1; h < 2; h++)
                     if ((k != 0 || h != 0) && k != h && k != -h && i + k >= 0 && i + k < rows && j + h >= 0 && j + h < cols){
-                        temp += loads[i + k][j + h] * NEIGH_TEMP;
+                        temp += loads[(i + k)*cols + (j + h)] * NEIGH_TEMP;
                     }
-            temps[i][j] = ENV_TEMP + loads[i][j] * SELF_TEMP + temp;
+            temps[i*cols+j] = ENV_TEMP + loads[i*cols+j] * SELF_TEMP + temp;
         }
 }
