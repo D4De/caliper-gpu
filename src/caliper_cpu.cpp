@@ -135,7 +135,10 @@ int main(int argc, char* argv[]) {
           minIndex = -1;
         //-----------Redistribute Loads among alive cores----------
             double distributedLoad = wl * max_cores / left_cores;
-
+            if (distributedLoad > 1) {
+                std::cerr << "QoS not satisfied with less than " << (left_cores + 1) << " cores" << std::endl;
+                return 1;
+            }
             for (int i = 0, k = 0; i < rows; i++) {
                 for (int j = 0; j < cols; j++) {
                     if (alives[i*cols+j] == true) {
@@ -146,6 +149,8 @@ int main(int argc, char* argv[]) {
                     k++;
                 }
             }
+
+
 
         //-----------Compute Temperatures of each core based on loads----
             
