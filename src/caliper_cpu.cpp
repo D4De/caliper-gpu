@@ -135,6 +135,7 @@ int main(int argc, char* argv[]) {
           minIndex = -1;
         //-----------Redistribute Loads among alive cores----------
             double distributedLoad = wl * max_cores / left_cores;
+            //this check can be done a priori outside the loop by looking at the case where min_cores = left_cores
             if (distributedLoad > 1) {
                 std::cerr << "QoS not satisfied with less than " << (left_cores + 1) << " cores" << std::endl;
                 return 1;
