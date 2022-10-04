@@ -1,3 +1,5 @@
+#ifndef BENCHMARK
+#define BENCHMARK
 #include <sys/time.h>
 #include <unordered_map>
 #include <fstream>
@@ -131,3 +133,5 @@ public:
 
     
 };
+
+#endif //BENCHMARK

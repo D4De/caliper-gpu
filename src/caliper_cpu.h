@@ -1,47 +1,49 @@
-#ifndef CALIPER_GPU
-#define CALIPER_GPU
-    #include "cuda_helper.h"
+#ifndef CALIPER_CPU
+#define CALIPER_CPU
     #include "./thermal_model.h"
-    #include "./benchmark_helper.h"
     #include "./utils.h"
 #endif
+double montecarlo_simulation_cpu(int num_of_tests,int max_cores,int min_cores,int rows,int cols, int wl){
+     //TODO INSERT ALSO THE "CONFIDENCE LEVEL STOP CONDITION"
+    
+    int left_cores;
+    int sumTTF = 0;
+    double *loads;
+    double *temps;
+    loads = (double*) malloc(sizeof(double)* rows * cols);
+    temps = (double*) malloc(sizeof(double)* rows * cols);
 
-#if defined(CUDA)
-__global__ void init(unsigned int seed, curandState_t *states){
-    unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    curand_init(seed, tid, 0, &states[tid]);
-    //curand_init(seed, blockIdx.x, 0, &states[blockIdx.x]);
-}
 
-__global__ void montecarlo_simulation_cuda(curandState_t *states, int num_of_tests,int max_cores,int min_cores,int rows,int cols, int wl,float * sumTTF_res){
- 
-    unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
-        
-    if(tid<num_of_tests){
+     for (int i = 0;i < num_of_tests; i++) {
         double random;
-        int left_cores;
-        double currR[ROWS*COLS];
+        double* currR;
         double stepT;
+        std::string currConf;
         int minIndex;
         double totalTime;
-        bool alives[ROWS*COLS];
+        bool* alives;
         int j;
         double t, eqT;
-        double loads[ROWS*COLS];
-        double temps[ROWS*COLS];
 
+    //-----------EXPERIMENT INITIALIZATION----------
         left_cores = max_cores;
         totalTime = 0;
         minIndex = 0;
-
+        currConf = EMPTY_SET;
+        //Arrays Allocation:
+        currR  = (double*) malloc(sizeof(double)*max_cores);
+        alives = (bool*)   malloc(sizeof(bool)*max_cores);
+        //Arrays Initialization:
         for (j = 0; j < max_cores; j++) {
             currR[j]  = 1;
             alives[j] = true;
         }
 
+    //-----------RUN CURRENT EXPERIMENT----------
+    //THIS CYCLE generate failure times for alive cores and find the shortest one  
         while (left_cores >= min_cores) {
-             minIndex = -1;
-
+        //Initialize Minimum index
+          minIndex = -1;
         //-----------Redistribute Loads among alive cores----------
             double distributedLoad = wl * max_cores / left_cores;
 
@@ -56,24 +58,19 @@ __global__ void montecarlo_simulation_cuda(curandState_t *states, int num_of_tes
                 }
             }
 
-            tempModel(loads, temps, rows, cols);
+        //-----------Compute Temperatures of each core based on loads----
             
-            //-----------Random Walk Step computation-------------------------
+	        tempModel(loads, temps, rows, cols);
+            
+        //-----------Random Walk Step computation-------------------------
             for (j = 0; j < max_cores; j++) {
                 if (alives[j] == true) {
-                    random = curand_uniform(&states[tid]); //current core will potentially die when its R will be equal to random. drand48() generates a number in the interval [0.0;1.0)
+                    random = (double) drand48() * currR[j]; //current core will potentially die when its R will be equal to random. drand48() generates a number in the interval [0.0;1.0)
                     double alpha = getAlpha(temps[j]);
                     double alpha_rounded = round1(alpha);
                     t = alpha_rounded * pow(-log(random), (double) 1 / BETA); //elapsed time from 0 to obtain the new R value equal to random
                     eqT = alpha_rounded * pow(-log(currR[j]), (double) 1 / BETA); //elapsed time from 0 to obtain the previous R value
                     t = t - eqT;
-                    if(tid==1){
-                        printf("%d -> Death Time: %f\n",j,t);
-
-                        if(t<0){
-                            printf("NEGATIVE VAL, ERROR, APLPHA = (%f)\n",alpha_rounded);
-                        }
-                    }
                     //the difference between the two values represents the time elapsed from the previous failure to the current failure
                     //(we will sum to the total time the minimum of such values)
                     
@@ -85,14 +82,18 @@ __global__ void montecarlo_simulation_cuda(curandState_t *states, int num_of_tes
             }
         //-------Check if No failed core founded-----------
             if (minIndex == -1) {
-                //TODO HOW THROW ERRORS IN CUDA?????
-                return;
+                std::cerr << "Failing cores not found" << std::endl;
+                return 1;
             }
-            if(tid==1){
-                printf("\nDead core: \t%d (%f)->%f\n",minIndex,stepT,totalTime);
-            }
+
         //---------UPDATE TOTAL TIME----------------- 
+            // update total time by using equivalent time according to the R for the core that is dying
+            //stepT is the time starting from 0 to obtain the R value when the core is dead with the current load
+            //eqT is the time starting from 0 to obtain the previous R value with the current load
+            //thus the absolute totalTime when the core is dead is equal to the previous totalTime + the difference between stepT and eqT
+            //geometrically we translate the R given the current load to right in order to intersect the previous R curve in the previous totalTime
             totalTime = totalTime + stepT; //Current simulation time
+
         //---------UPDATE Configuration----------------- 
             if (left_cores > min_cores) {
                 alives[minIndex] = false;
@@ -105,13 +106,17 @@ __global__ void montecarlo_simulation_cuda(curandState_t *states, int num_of_tes
                             currR[j] = exp(-pow((stepT + eqT) / alpha_rounded, BETA));
                     }
                 }
+                if (currConf == EMPTY_SET)
+                    currConf = MAKE_STRING(minIndex);
+                else
+                    currConf = MAKE_STRING(currConf << "," << minIndex);
             }
             left_cores--;
+            
         }
-        __syncthreads();
-        atomicAdd(sumTTF_res,(float)totalTime); //sumTTF += totaltime
-        //printf("ss=%f \n", totalTime);
-        }
-}
+    //---------UPDATE Stats----------------- 
+    sumTTF += totalTime;
+    }  
+    return sumTTF
 
-#endif
+}

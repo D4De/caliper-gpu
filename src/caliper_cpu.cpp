@@ -210,6 +210,8 @@ int main(int argc, char* argv[]) {
             
         }
     //---------UPDATE Stats----------------- 
+
+        std::cout<<totalTime<<"\n";
         results[totalTime]++; //
         sumTTF += totalTime;
         sumTTFX2 += totalTime * totalTime;

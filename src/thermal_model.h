@@ -1,4 +1,5 @@
-//#include "cuda_helper.h"
+#ifndef THERMAL_MODEL
+#define THERMAL_MODEL
 #define ROWS 5
 #define COLS 5
 
@@ -26,8 +27,9 @@
 
 // Support function to allow arbitrary confidence intervals
 #define INV_ERF_ACCURACY 10e-6
+//__device__ __host__ 
 
-void tempModel(double *loads, double* temps, int rows, int cols) {
+__device__ __host__ void tempModel(double *loads, double* temps, int rows, int cols) {
     double temp;
     int i, j, k, h;
     for (i = 0; i < rows; i++)
@@ -40,3 +42,4 @@ void tempModel(double *loads, double* temps, int rows, int cols) {
             temps[i*cols+j] = ENV_TEMP + loads[i*cols+j] * SELF_TEMP + temp;
         }
 }
+#endif //THERMAL_MODEL

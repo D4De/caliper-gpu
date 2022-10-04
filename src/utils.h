@@ -1,3 +1,5 @@
+#ifndef UTILS
+#define UTILS
 #include <iostream>
 #include <string>
 #include <cmath>
@@ -16,9 +18,9 @@
 
 #define EMPTY_SET "#"
 #define MAKE_STRING( msg )  ( ((std::ostringstream&)((std::ostringstream() << '\x0') << msg)).str().substr(1) )
-
+//__device__ __host__ 
 //ROUND TO 6 digit
-double round1(double n){
+__device__ __host__  double round1(double n){
 	int k = 0;
 	while(n<100000){
 		k++;
@@ -29,7 +31,7 @@ double round1(double n){
 	return n;
 }
 
-double invErf(double f) {
+__device__ __host__  double invErf(double f) {
 // inverts the gaussian distribution N(0,1) using the bisection method
     double l = 0;
     double r = 1;
@@ -58,3 +60,5 @@ double invErf(double f) {
 
     return h;
 }
+
+#endif //UTILS

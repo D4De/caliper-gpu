@@ -16,7 +16,7 @@ Neither the name of Politecnico di Milano nor the names of its contributors may 
 //CUSTOM HEADERS:
 #define CUDA
 #include "caliper_gpu.h"
-#define BLOCK_DIM 128
+#define BLOCK_DIM 256
 
 
 int main(int argc, char* argv[]) {
@@ -29,7 +29,7 @@ int main(int argc, char* argv[]) {
     char* outputfilename = NULL;
     bool numTest = false;
 
-    unsigned short randomSeed[3] = { 0, 0, 0 };
+    unsigned short randomSeed[3] = { 23, 132, 222 };
     double confInt = 0, thr = 0;
     
     int cols,rows;
@@ -48,9 +48,7 @@ int main(int argc, char* argv[]) {
     max_cores       = rows * cols;
     wl              = atof(argv[4]);
 
-    std::cout<<"ARG: "<<argv[5]<<"\n";
-    if(strcmp(argv[5]," -g")){
-        std::cout<<"AAAA";
+    if(argv[5][1] == 'g'){
         isGPU = true;
     }
 
@@ -104,24 +102,48 @@ int main(int argc, char* argv[]) {
     double mean;   // current mean of the distribution
     double var;	   // current variance of the distribution
 
-    float *sumTTF_GPU;
-    CHECK(cudaMalloc(&sumTTF_GPU, sizeof(float)));
+    //------------------------------------------------------------------------------
+    //----------Run Monte Carlo Simulation------------------------------------------
+    //------------------------------------------------------------------------------
+   
+    if(isGPU){
 
-    if(true){
+        //TODO: Put all this Code inside a host function
+        std::cout<<"EXECUTED ON GPU:"<<std::endl;
+
+        //----CUDA variables:------------
+        float *sumTTF_GPU; //GPU result
+        float res;
+        curandState_t *states;
+        
+        //----MEMORY ALLOCATION:---------
+        CHECK(cudaMalloc(&sumTTF_GPU, sizeof(float))); //Allocate Result memory
+        CHECK(cudaMalloc(&states, num_of_tests*sizeof(curandState_t))); //Random States array
+
+        //----Declare Grid Dimensions:---------
         dim3 blocksPerGrid((num_of_tests+BLOCK_DIM-1)/BLOCK_DIM,1,1);
         dim3 threadsPerBlock(BLOCK_DIM,1,1);
 
-        std::cout<<"EXECUTED ON GPU:"<<std::endl;
-        curandState_t *states;
-        float res;
-       CHECK(cudaMalloc(&states, num_of_tests*sizeof(curandState_t)));
-       init<<<num_of_tests,1>>>(time(NULL),states);
+        //----KERNELS CALL -------------------
+        //Inizialize Random states
+        init<<<blocksPerGrid,threadsPerBlock>>>(time(NULL),states);
+        cudaDeviceSynchronize();
+        CHECK_KERNELCALL();
+        timer.start();
+        //Execute Montecarlo simulation on GPU
         montecarlo_simulation_cuda<<<blocksPerGrid,threadsPerBlock>>>(states,num_of_tests,max_cores,min_cores,rows,cols,wl,sumTTF_GPU);
         cudaDeviceSynchronize();
-        
+        CHECK_KERNELCALL();
+        timer.stop();
+        //----Copy back results on CPU-----------
         CHECK(cudaMemcpy(&res, sumTTF_GPU, sizeof(float), cudaMemcpyDeviceToHost));
-        CHECK(cudaFree(sumTTF_GPU));
         sumTTF = (double) res;
+
+        //----FREE CUDA MEMORY------------------
+        CHECK(cudaFree(sumTTF_GPU));
+        CHECK(cudaFree(states));
+        
+        //----CALCULATE OTHER RESULTS-----------
         std::cout<<"SumTTF : \t"<<sumTTF<<"\n";
         sumTTFX2 = sumTTF * sumTTF;
         mean = sumTTF / (double) (i + 1); //do consider that i is incremented later
@@ -129,10 +151,9 @@ int main(int argc, char* argv[]) {
         ciSize = Zinv * sqrt(var / (double) (i + 1));
 
     }else{
-    //------------------------------------------------------------------------------
-    //----------Run Monte Carlo Simulation------------------------------------------
-    //------------------------------------------------------------------------------
-    //when using the confidence interval, we want to execute at least MIN_NUM_OF_TRIALS
+
+    //TODO PUT ALL THE HOST CODE INSIDE A FUNCTION LIKE FOR GPU KERNEL
+     //when using the confidence interval, we want to execute at least MIN_NUM_OF_TRIALS
     timer.start();
     for (i = 0; (numTest && (i < num_of_tests)) || (!numTest && ((i < MIN_NUM_OF_TRIALS) || (ciSize / mean > ht))); i++) {
         double random;
@@ -181,7 +202,9 @@ int main(int argc, char* argv[]) {
         //-----------Compute Temperatures of each core based on loads----
             
 	        tempModel(loads, temps, rows, cols);
-            
+            if(i==1){
+                std::cout<<left_cores<<" Left cores\n";
+            }
         //-----------Random Walk Step computation-------------------------
             for (j = 0; j < max_cores; j++) {
                 if (alives[j] == true) {
@@ -191,6 +214,9 @@ int main(int argc, char* argv[]) {
                     t = alpha_rounded * pow(-log(random), (double) 1 / BETA); //elapsed time from 0 to obtain the new R value equal to random
                     eqT = alpha_rounded * pow(-log(currR[j]), (double) 1 / BETA); //elapsed time from 0 to obtain the previous R value
                     t = t - eqT;
+                    if(i==1){
+                        std::cout<<j<<" ->Death Time: \t"<<t<<"\n";
+                    }
                     //the difference between the two values represents the time elapsed from the previous failure to the current failure
                     //(we will sum to the total time the minimum of such values)
                     
@@ -204,6 +230,10 @@ int main(int argc, char* argv[]) {
             if (minIndex == -1) {
                 std::cerr << "Failing cores not found" << std::endl;
                 return 1;
+            }
+
+            if(i==1){
+                std::cout<<"Dead core: \t"<<minIndex<<" ("<<stepT<<")->"<<totalTime<<"\n";
             }
 
         //---------UPDATE TOTAL TIME----------------- 
@@ -235,6 +265,8 @@ int main(int argc, char* argv[]) {
             
         }
     //---------UPDATE Stats----------------- 
+        
+        //std::cout<<totalTime<<"\n";
         results[totalTime]++; //
         sumTTF += totalTime;
         sumTTFX2 += totalTime * totalTime;
