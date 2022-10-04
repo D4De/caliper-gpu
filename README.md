@@ -13,6 +13,7 @@
 * Build a test-bench to see time improvement and save progess of each algo version
 * Build a little script to run all cuda statistics commands and save the results in our own format (This make easy to compare different version of our algorithm)
 * (See other possible parallelizations)
+* Improve the CPU performance by inserting an HASHmap to save dynamically alpha configurations (dynamic programming) so that noo need to recompute alphas if same configuration occur multiple time during simulations
   
 ## Already Done Steps:
 * Now Caliper is stand-alone, it dosnt need any tempModel file and can build it using an online approach
