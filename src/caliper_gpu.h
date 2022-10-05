@@ -6,6 +6,8 @@
     #include "./utils.h"
 #endif
 
+#define debugMSG(msg) if(printf(msg)
+
 #if defined(CUDA)
 __global__ void init(unsigned int seed, curandState_t *states){
     unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -13,7 +15,7 @@ __global__ void init(unsigned int seed, curandState_t *states){
     //curand_init(seed, blockIdx.x, 0, &states[blockIdx.x]);
 }
 
-__global__ void montecarlo_simulation_cuda(curandState_t *states, int num_of_tests,int max_cores,int min_cores,int rows,int cols, int wl,float * sumTTF_res){
+__global__ void montecarlo_simulation_cuda(curandState_t *states, int num_of_tests,int max_cores,int min_cores,int rows,int cols, float wl,float * sumTTF_res){
  
     unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
         
@@ -42,8 +44,9 @@ __global__ void montecarlo_simulation_cuda(curandState_t *states, int num_of_tes
         while (left_cores >= min_cores) {
              minIndex = -1;
 
+        
         //-----------Redistribute Loads among alive cores----------
-            double distributedLoad = wl * max_cores / left_cores;
+            double distributedLoad = (double)wl * (double)max_cores / (double)left_cores;
 
             for (int i = 0, k = 0; i < rows; i++) {
                 for (int j = 0; j < cols; j++) {
@@ -56,24 +59,29 @@ __global__ void montecarlo_simulation_cuda(curandState_t *states, int num_of_tes
                 }
             }
 
-            tempModel(loads, temps, rows, cols);
+            //CHECK HOW DYNAMICALY ALLOCATE ARRAY INSIDE KERNEL (into registers and not global memory)
+           tempModel(loads, temps, rows, cols); //CHECK HOW PASS CUDA ARRAY TO FUNCTION BY REFERENCE
             
             //-----------Random Walk Step computation-------------------------
             for (j = 0; j < max_cores; j++) {
                 if (alives[j] == true) {
-                    random = curand_uniform(&states[tid]); //current core will potentially die when its R will be equal to random. drand48() generates a number in the interval [0.0;1.0)
+                    //Random  is in range [0 : currR[j]]
+                    random =(double)curand_uniform(&states[tid])* currR[j]; //current core will potentially die when its R will be equal to random. drand48() generates a number in the interval [0.0;1.0)
                     double alpha = getAlpha(temps[j]);
                     double alpha_rounded = round1(alpha);
                     t = alpha_rounded * pow(-log(random), (double) 1 / BETA); //elapsed time from 0 to obtain the new R value equal to random
                     eqT = alpha_rounded * pow(-log(currR[j]), (double) 1 / BETA); //elapsed time from 0 to obtain the previous R value
                     t = t - eqT;
-                    if(tid==1){
-                        printf("%d -> Death Time: %f\n",j,t);
 
-                        if(t<0){
-                            printf("NEGATIVE VAL, ERROR, APLPHA = (%f)\n",alpha_rounded);
-                        }
+                    //EQT > t some times... WHY??? (Overflow? Error? Random function?)
+                    //Strange CurrR behaviour (on GPU remain near 1 on CPU it decrease correctly toward 0)
+                    //ON GPU The random number seem generally higher than cpu rand ...
+
+                    //THE PROBLEMS IS IN tempModel()... (PUT 863361.000 to all alphas!!!!!!!! -> is due to pointers incompatible with cuda?)
+                    if(tid==1){
+                        //printf("%d -> Death Time: %f ->(%f)(%f) -- [%f][%f][%f]\n",j,t,random,currR[j],alpha_rounded,temps[j],loads[j]);
                     }
+
                     //the difference between the two values represents the time elapsed from the previous failure to the current failure
                     //(we will sum to the total time the minimum of such values)
                     
@@ -89,7 +97,8 @@ __global__ void montecarlo_simulation_cuda(curandState_t *states, int num_of_tes
                 return;
             }
             if(tid==1){
-                printf("\nDead core: \t%d (%f)->%f\n",minIndex,stepT,totalTime);
+                //double alpha = getAlpha(temps[minIndex]);
+                //printf("\nDead core: \t%d (%f)->%f [%f]\n",minIndex,stepT,totalTime,alpha);
             }
         //---------UPDATE TOTAL TIME----------------- 
             totalTime = totalTime + stepT; //Current simulation time

@@ -202,9 +202,6 @@ int main(int argc, char* argv[]) {
         //-----------Compute Temperatures of each core based on loads----
             
 	        tempModel(loads, temps, rows, cols);
-            if(i==1){
-                std::cout<<left_cores<<" Left cores\n";
-            }
         //-----------Random Walk Step computation-------------------------
             for (j = 0; j < max_cores; j++) {
                 if (alives[j] == true) {
@@ -215,7 +212,8 @@ int main(int argc, char* argv[]) {
                     eqT = alpha_rounded * pow(-log(currR[j]), (double) 1 / BETA); //elapsed time from 0 to obtain the previous R value
                     t = t - eqT;
                     if(i==1){
-                        std::cout<<j<<" ->Death Time: \t"<<t<<"\n";
+                        //printf("%d -> Death Time: %f ->(%f)(%f) -- [%f][%f][%f]\n",j,t,random,currR[j],alpha_rounded,temps[j],loads[j]);
+                        
                     }
                     //the difference between the two values represents the time elapsed from the previous failure to the current failure
                     //(we will sum to the total time the minimum of such values)
@@ -233,7 +231,8 @@ int main(int argc, char* argv[]) {
             }
 
             if(i==1){
-                std::cout<<"Dead core: \t"<<minIndex<<" ("<<stepT<<")->"<<totalTime<<"\n";
+                //double alpha = getAlpha(temps[minIndex]);
+                //printf("\nDead core: \t%d (%f)->%f [%f]\n",minIndex,stepT,totalTime,alpha);
             }
 
         //---------UPDATE TOTAL TIME----------------- 

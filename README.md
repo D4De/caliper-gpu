@@ -24,6 +24,7 @@
 * Is the "R()" function output file necessary? (because it is build on an hashmap incompatible with cuda)
 * Is the parallel floating point addition a problem? (in AAPP we have seen that the approximation of floating points make the results of multiple execution different)
 * How does the approximation on alpha values work? We implement a naive function which always keeps exactly 6 digits
+* How allocate dynamically an array into registers of gpu (instead of global memory)
 ## Caliper CPU args:
 
 ## Caliper GPU args:
