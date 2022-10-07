@@ -45,17 +45,18 @@ ARCHITECTURE_FLAG = $(ARCH),$(CODE)
 #--------MAKEFILE COMMANDS---------------
 #----------------------------------------
 
-all: cpu #gpu
+all: clean cpu #gpu
 #gpu: $(CALIPER_GPU_EX)
 cpu: $(CALIPER_CPU_EX)
 gpu:
-	nvcc -m64 -gencode $(ARCHITECTURE_FLAG) -o gpu_exec ./src/caliper_gpu.cu
+	nvcc -m64 -gencode $(ARCHITECTURE_FLAG) -rdc=true -lcudadevrt  -o gpu_exec ./src/caliper_gpu.cu
 	
 buid_folders:
 	mkdir -p $(CPU_BUILD_PATH)
 
 $(CALIPER_CPU_EX): buid_folders $(CALIPER_OBJ) 
 	#------START Caliper CPU build------
+	rm caliper $(CALIPER_EX)
 	$(CXX) $(CALIPER_OBJ) $(LDFLAGS) -o $@
 	#------END   Caliper CPU build------
 

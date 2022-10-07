@@ -3,36 +3,45 @@
     #include "./thermal_model.h"
     #include "./utils.h"
 #endif
-double montecarlo_simulation_cpu(int num_of_tests,int max_cores,int min_cores,int rows,int cols, int wl){
-     //TODO INSERT ALSO THE "CONFIDENCE LEVEL STOP CONDITION"
+
+void montecarlo_simulation_cpu(int num_of_tests,int max_cores,int min_cores,int rows,int cols, double wl, double * sumTTF,double * sumTTFx2){
+   
+    //-------------------------------------------------
+    //----Variables Declaration------------------------
+    //-------------------------------------------------
+    double * loads;
+    double * temps;
+    double * currR;
+    bool   * alives;
     
+    int i;
     int left_cores;
-    int sumTTF = 0;
-    double *loads;
-    double *temps;
-    loads = (double*) malloc(sizeof(double)* rows * cols);
-    temps = (double*) malloc(sizeof(double)* rows * cols);
+    //-------------------------------------------------
+    //----Allocate Memory------------------------------
+    //-------------------------------------------------
+    loads   = (double*) malloc(sizeof(double)* rows * cols);
+    temps   = (double*) malloc(sizeof(double)* rows * cols);
+    currR   = (double*) malloc(sizeof(double)* rows * cols);
+    alives  = (bool*)   malloc(sizeof(bool)* rows * cols);
+
+    //--------------------------------------------------
+    //---Montecarlo Simulation--------------------------
+    //--------------------------------------------------
 
 
-     for (int i = 0;i < num_of_tests; i++) {
+    //TODO PUT again THE "level of confidence as possible stop condition"
+    for (i = 0;i < num_of_tests; i++) {
         double random;
-        double* currR;
         double stepT;
-        std::string currConf;
         int minIndex;
         double totalTime;
-        bool* alives;
-        int j;
         double t, eqT;
-
+        int j;
     //-----------EXPERIMENT INITIALIZATION----------
         left_cores = max_cores;
         totalTime = 0;
         minIndex = 0;
-        currConf = EMPTY_SET;
-        //Arrays Allocation:
-        currR  = (double*) malloc(sizeof(double)*max_cores);
-        alives = (bool*)   malloc(sizeof(bool)*max_cores);
+
         //Arrays Initialization:
         for (j = 0; j < max_cores; j++) {
             currR[j]  = 1;
@@ -42,8 +51,8 @@ double montecarlo_simulation_cpu(int num_of_tests,int max_cores,int min_cores,in
     //-----------RUN CURRENT EXPERIMENT----------
     //THIS CYCLE generate failure times for alive cores and find the shortest one  
         while (left_cores >= min_cores) {
-        //Initialize Minimum index
-          minIndex = -1;
+            //Initialize Minimum index
+            minIndex = -1;
         //-----------Redistribute Loads among alive cores----------
             double distributedLoad = wl * max_cores / left_cores;
 
@@ -61,16 +70,18 @@ double montecarlo_simulation_cpu(int num_of_tests,int max_cores,int min_cores,in
         //-----------Compute Temperatures of each core based on loads----
             
 	        tempModel(loads, temps, rows, cols);
-            
         //-----------Random Walk Step computation-------------------------
             for (j = 0; j < max_cores; j++) {
                 if (alives[j] == true) {
                     random = (double) drand48() * currR[j]; //current core will potentially die when its R will be equal to random. drand48() generates a number in the interval [0.0;1.0)
                     double alpha = getAlpha(temps[j]);
-                    double alpha_rounded = round1(alpha);
-                    t = alpha_rounded * pow(-log(random), (double) 1 / BETA); //elapsed time from 0 to obtain the new R value equal to random
-                    eqT = alpha_rounded * pow(-log(currR[j]), (double) 1 / BETA); //elapsed time from 0 to obtain the previous R value
+                    t = alpha * pow(-log(random), (double) 1 / BETA); //elapsed time from 0 to obtain the new R value equal to random
+                    eqT = alpha * pow(-log(currR[j]), (double) 1 / BETA); //elapsed time from 0 to obtain the previous R value
                     t = t - eqT;
+                    if(i==1){
+                        //printf("%d -> Death Time: %f ->(%f)(%f) -- [%f][%f][%f]\n",j,t,random,currR[j],alpha_rounded,temps[j],loads[j]);
+                        
+                    }
                     //the difference between the two values represents the time elapsed from the previous failure to the current failure
                     //(we will sum to the total time the minimum of such values)
                     
@@ -83,7 +94,7 @@ double montecarlo_simulation_cpu(int num_of_tests,int max_cores,int min_cores,in
         //-------Check if No failed core founded-----------
             if (minIndex == -1) {
                 std::cerr << "Failing cores not found" << std::endl;
-                return 1;
+                return;
             }
 
         //---------UPDATE TOTAL TIME----------------- 
@@ -101,22 +112,16 @@ double montecarlo_simulation_cpu(int num_of_tests,int max_cores,int min_cores,in
                 for (j = 0; j < max_cores; j++) {
                     if (alives[j]) {
                     		double alpha = getAlpha(temps[j]);
-                    		double alpha_rounded = round1(alpha);
-                            eqT = alpha_rounded * pow(-log(currR[j]), (double) 1 / BETA); //TODO: fixed a buf. we have to use the eqT of the current unit and not the one of the failed unit
-                            currR[j] = exp(-pow((stepT + eqT) / alpha_rounded, BETA));
+                            eqT = alpha * pow(-log(currR[j]), (double) 1 / BETA); //TODO: fixed a buf. we have to use the eqT of the current unit and not the one of the failed unit
+                            currR[j] = exp(-pow((stepT + eqT) / alpha, BETA));
                     }
                 }
-                if (currConf == EMPTY_SET)
-                    currConf = MAKE_STRING(minIndex);
-                else
-                    currConf = MAKE_STRING(currConf << "," << minIndex);
             }
             left_cores--;
             
         }
     //---------UPDATE Stats----------------- 
-    sumTTF += totalTime;
-    }  
-    return sumTTF
-
+    *sumTTF     += totalTime;
+    *sumTTFx2   += totalTime * totalTime;
+    }
 }

@@ -20,7 +20,7 @@
 #define MAKE_STRING( msg )  ( ((std::ostringstream&)((std::ostringstream() << '\x0') << msg)).str().substr(1) )
 //__device__ __host__ 
 //ROUND TO 6 digit
-__device__ __host__  double round1(double n){
+double round1(double n){
 	int k = 0;
 	while(n<100000){
 		k++;
@@ -31,7 +31,7 @@ __device__ __host__  double round1(double n){
 	return n;
 }
 
-__device__ __host__  double invErf(double f) {
+double invErf(double f) {
 // inverts the gaussian distribution N(0,1) using the bisection method
     double l = 0;
     double r = 1;

@@ -16,6 +16,7 @@ Neither the name of Politecnico di Milano nor the names of its contributors may 
 //CUSTOM HEADERS:
 #define CUDA
 #include "caliper_gpu.h"
+#include "caliper_cpu.h"
 #define BLOCK_DIM 256
 
 
@@ -112,12 +113,14 @@ int main(int argc, char* argv[]) {
         std::cout<<"EXECUTED ON GPU:"<<std::endl;
 
         //----CUDA variables:------------
-        float *sumTTF_GPU; //GPU result
+        float *sumTTF_GPU;   //GPU result sumTTF
+        float *sumTTFx2_GPU; //GPU result sumTTFx2
         float res;
         curandState_t *states;
         
         //----MEMORY ALLOCATION:---------
-        CHECK(cudaMalloc(&sumTTF_GPU, sizeof(float))); //Allocate Result memory
+        CHECK(cudaMalloc(&sumTTF_GPU  , sizeof(float)));   //Allocate Result memory
+        CHECK(cudaMalloc(&sumTTFx2_GPU, sizeof(float))); //Allocate Result memory
         CHECK(cudaMalloc(&states, num_of_tests*sizeof(curandState_t))); //Random States array
 
         //----Declare Grid Dimensions:---------
@@ -131,151 +134,32 @@ int main(int argc, char* argv[]) {
         CHECK_KERNELCALL();
         timer.start();
         //Execute Montecarlo simulation on GPU
-        montecarlo_simulation_cuda<<<blocksPerGrid,threadsPerBlock>>>(states,num_of_tests,max_cores,min_cores,rows,cols,wl,sumTTF_GPU);
+        montecarlo_simulation_cuda<<<blocksPerGrid,threadsPerBlock>>>(states,num_of_tests,max_cores,min_cores,rows,cols,wl,sumTTF_GPU,sumTTFx2_GPU);
         cudaDeviceSynchronize();
         CHECK_KERNELCALL();
         timer.stop();
         //----Copy back results on CPU-----------
         CHECK(cudaMemcpy(&res, sumTTF_GPU, sizeof(float), cudaMemcpyDeviceToHost));
         sumTTF = (double) res;
-
+        CHECK(cudaMemcpy(&res, sumTTFx2_GPU, sizeof(float), cudaMemcpyDeviceToHost));
+        sumTTFX2 = (double) res;
+        
         //----FREE CUDA MEMORY------------------
         CHECK(cudaFree(sumTTF_GPU));
         CHECK(cudaFree(states));
         
-        //----CALCULATE OTHER RESULTS-----------
-        std::cout<<"SumTTF : \t"<<sumTTF<<"\n";
-        sumTTFX2 = sumTTF * sumTTF;
-        mean = sumTTF / (double) (i + 1); //do consider that i is incremented later
-        var = sumTTFX2 / (double) (i) - mean * mean;
-        ciSize = Zinv * sqrt(var / (double) (i + 1));
-
     }else{
-
-    //TODO PUT ALL THE HOST CODE INSIDE A FUNCTION LIKE FOR GPU KERNEL
-     //when using the confidence interval, we want to execute at least MIN_NUM_OF_TRIALS
-    timer.start();
-    for (i = 0; (numTest && (i < num_of_tests)) || (!numTest && ((i < MIN_NUM_OF_TRIALS) || (ciSize / mean > ht))); i++) {
-        double random;
-        double* currR;
-        double stepT;
-        std::string currConf;
-        int minIndex;
-        double totalTime;
-        bool* alives;
-        int j;
-        double t, eqT;
-
-    //-----------EXPERIMENT INITIALIZATION----------
-        left_cores = max_cores;
-        totalTime = 0;
-        minIndex = 0;
-        currConf = EMPTY_SET;
-        //Arrays Allocation:
-        currR  = (double*) malloc(sizeof(double)*max_cores);
-        alives = (bool*)   malloc(sizeof(bool)*max_cores);
-        //Arrays Initialization:
-        for (j = 0; j < max_cores; j++) {
-            currR[j]  = 1;
-            alives[j] = true;
-        }
-
-    //-----------RUN CURRENT EXPERIMENT----------
-    //THIS CYCLE generate failure times for alive cores and find the shortest one  
-        while (left_cores >= min_cores) {
-        //Initialize Minimum index
-          minIndex = -1;
-        //-----------Redistribute Loads among alive cores----------
-            double distributedLoad = wl * max_cores / left_cores;
-
-            for (int i = 0, k = 0; i < rows; i++) {
-                for (int j = 0; j < cols; j++) {
-                    if (alives[i*cols+j] == true) {
-                        loads[i*cols+j] = distributedLoad;
-                    } else {
-                        loads[i*cols+j] = 0;
-                    }
-                    k++;
-                }
-            }
-
-        //-----------Compute Temperatures of each core based on loads----
-            
-	        tempModel(loads, temps, rows, cols);
-        //-----------Random Walk Step computation-------------------------
-            for (j = 0; j < max_cores; j++) {
-                if (alives[j] == true) {
-                    random = (double) drand48() * currR[j]; //current core will potentially die when its R will be equal to random. drand48() generates a number in the interval [0.0;1.0)
-                    double alpha = getAlpha(temps[j]);
-                    double alpha_rounded = round1(alpha);
-                    t = alpha_rounded * pow(-log(random), (double) 1 / BETA); //elapsed time from 0 to obtain the new R value equal to random
-                    eqT = alpha_rounded * pow(-log(currR[j]), (double) 1 / BETA); //elapsed time from 0 to obtain the previous R value
-                    t = t - eqT;
-                    if(i==1){
-                        //printf("%d -> Death Time: %f ->(%f)(%f) -- [%f][%f][%f]\n",j,t,random,currR[j],alpha_rounded,temps[j],loads[j]);
-                        
-                    }
-                    //the difference between the two values represents the time elapsed from the previous failure to the current failure
-                    //(we will sum to the total time the minimum of such values)
-                    
-                    if (minIndex == -1 || (minIndex != -1 && t < stepT)) {
-                        minIndex = j;//Set new minimum index
-                        stepT = t;   //set new minimum time as timeStep
-                    } //TODO ADD A CHECK ON MULTIPLE FAILURE IN THE SAME INSTANT OF TIME.
-                }
-            }
-        //-------Check if No failed core founded-----------
-            if (minIndex == -1) {
-                std::cerr << "Failing cores not found" << std::endl;
-                return 1;
-            }
-
-            if(i==1){
-                //double alpha = getAlpha(temps[minIndex]);
-                //printf("\nDead core: \t%d (%f)->%f [%f]\n",minIndex,stepT,totalTime,alpha);
-            }
-
-        //---------UPDATE TOTAL TIME----------------- 
-            // update total time by using equivalent time according to the R for the core that is dying
-            //stepT is the time starting from 0 to obtain the R value when the core is dead with the current load
-            //eqT is the time starting from 0 to obtain the previous R value with the current load
-            //thus the absolute totalTime when the core is dead is equal to the previous totalTime + the difference between stepT and eqT
-            //geometrically we translate the R given the current load to right in order to intersect the previous R curve in the previous totalTime
-            totalTime = totalTime + stepT; //Current simulation time
-
-        //---------UPDATE Configuration----------------- 
-            if (left_cores > min_cores) {
-                alives[minIndex] = false;
-                // compute remaining reliability for working cores
-                for (j = 0; j < max_cores; j++) {
-                    if (alives[j]) {
-                    		double alpha = getAlpha(temps[j]);
-                    		double alpha_rounded = round1(alpha);
-                            eqT = alpha_rounded * pow(-log(currR[j]), (double) 1 / BETA); //TODO: fixed a buf. we have to use the eqT of the current unit and not the one of the failed unit
-                            currR[j] = exp(-pow((stepT + eqT) / alpha_rounded, BETA));
-                    }
-                }
-                if (currConf == EMPTY_SET)
-                    currConf = MAKE_STRING(minIndex);
-                else
-                    currConf = MAKE_STRING(currConf << "," << minIndex);
-            }
-            left_cores--;
-            
-        }
-    //---------UPDATE Stats----------------- 
-        
-        //std::cout<<totalTime<<"\n";
-        results[totalTime]++; //
-        sumTTF += totalTime;
-        sumTTFX2 += totalTime * totalTime;
-        mean = sumTTF / (double) (i + 1); //do consider that i is incremented later
-        var = sumTTFX2 / (double) (i) - mean * mean;
-        ciSize = Zinv * sqrt(var / (double) (i + 1));
-    }
-     timer.stop();
+        //when using the confidence interval, we want to execute at least MIN_NUM_OF_TRIALS
+        timer.start();
+        montecarlo_simulation_cpu(num_of_tests,max_cores,min_cores,rows,cols,wl,&sumTTF,&sumTTFX2);
+        timer.stop();
     }
 
+    //----CALCULATE OTHER RESULTS-----------
+    std::cout<<"SumTTF : \t"<<sumTTF<<"\n";
+    mean = sumTTF / (double) (num_of_tests + 1); //do consider that i is incremented later
+    var = sumTTFX2 / (double) (num_of_tests) - mean * mean;
+    ciSize = Zinv * sqrt(var / (double) (num_of_tests + 1));
    
     //------------------------------------------------------------------------------
     //---------Display Results------------------------------------------------------

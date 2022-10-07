@@ -27,6 +27,8 @@
 * How allocate dynamically an array into registers of gpu (instead of global memory)
 ## Caliper CPU args:
 
+testare il tempo di esecuzione con grossi numeri
+
 ## Caliper GPU args:
 
 ## Result FILE FORMAT:

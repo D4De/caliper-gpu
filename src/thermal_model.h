@@ -1,7 +1,7 @@
 #ifndef THERMAL_MODEL
 #define THERMAL_MODEL
-#define ROWS 5
-#define COLS 5
+#define ROWS 10
+#define COLS 10
 
 // Electro-Migration related parameters
 #define BETA 2
@@ -29,21 +29,8 @@
 #define INV_ERF_ACCURACY 10e-6
 //__device__ __host__ 
 
-__device__ __host__ void tempModel_gpu(double loads[], double temps[], int rows, int cols) {
-    double temp;
-    int i, j, k, h;
-    for (i = 0; i < rows; i++)
-        for (j = 0; j < cols; j++) {
-            for (k = -1, temp = 0; k < 2; k++)
-                for (h = -1; h < 2; h++)
-                    if ((k != 0 || h != 0) && k != h && k != -h && i + k >= 0 && i + k < rows && j + h >= 0 && j + h < cols){
-                        temp += loads[(i + k)*cols + (j + h)] * NEIGH_TEMP;
-                    }
-            temps[i*cols+j] = ENV_TEMP + loads[i*cols+j] * SELF_TEMP + temp;
-        }
-}
 
-__device__ __host__ void tempModel(double *loads, double* temps, int rows, int cols) {
+void tempModel(double *loads, double* temps, int rows, int cols) {
     double temp;
     int i, j, k, h;
     for (i = 0; i < rows; i++)
