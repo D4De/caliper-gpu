@@ -135,7 +135,7 @@ int main(int argc, char* argv[]) {
     std::cout << "Coefficient of variation: " << (sqrt(var) / mean) << std::endl;
     std::cout << "Confidence interval: " << mean - ciSize << " " << mean + ciSize << std::endl;
     */
-        std::cout<<rows<<";"<<cols<<";"<<rows*cols<<";"<<min_cores<<";"<<wl<<";"<<((double) timer.getTime())<<";\n";
+    std::cout<<rows<<","<<cols<<","<<rows*cols<<","<<min_cores<<","<<wl<<","<<((double) timer.getTime())<<"\n";
     benchmark.set_results(mttf_int,timer.getTime(),mean,var,ciSize);
     benchmark.save_results("benchmark.txt");
     return 0;

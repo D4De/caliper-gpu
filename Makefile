@@ -40,7 +40,10 @@ CODE = code=sm_$(CAPABILITY)
 ARCH = arch=compute_$(CAPABILITY)
 ARCHITECTURE_FLAG = $(ARCH),$(CODE)
 
-
+#STATISTICS FOLDERS
+STATISTICS_PATH=./statistics
+STATISTICS_CPU_FILE=$(STATISTICS_PATH)/cpu-times.csv
+BENCHMARK_SCRIPT=./run-benchmark.sh
 #----------------------------------------
 #--------MAKEFILE COMMANDS---------------
 #----------------------------------------
@@ -50,7 +53,17 @@ all: clean cpu #gpu
 cpu: $(CALIPER_CPU_EX)
 gpu:
 	nvcc -m64 -gencode $(ARCHITECTURE_FLAG) -rdc=true -lcudadevrt  -o gpu_exec ./src/caliper_gpu.cu
+
+
+statistics:clean-statistics $(STATISTICS_CPU_FILE)
+	#Statistics ended computation
+
+clean-statistics:
+	rm -f $(STATISTICS_CPU_FILE)
 	
+$(STATISTICS_CPU_FILE):
+	$(BENCHMARK_SCRIPT) >> $(STATISTICS_CPU_FILE)
+
 buid_folders:
 	mkdir -p $(CPU_BUILD_PATH)
 
