@@ -29,7 +29,7 @@ int main(int argc, char* argv[]) {
 
     bool isGPU = false;
     char* outputfilename = NULL;
-    bool numTest = false;
+    bool numTest = true;
 
     unsigned short randomSeed[3] = { 0, 0, 0 };
     double confInt = 0, thr = 0;
@@ -47,6 +47,13 @@ int main(int argc, char* argv[]) {
     min_cores       = atoi(argv[3]);
     max_cores       = rows * cols;
     wl              = atof(argv[4]);
+    
+    if(argc > 5 && argv[5][1] == 'c')
+    {
+        confInt = atof(argv[6]);
+        thr = atof(argv[7]);
+        numTest = false;
+    }
     //outputfilename  = argv[5];
     
 
@@ -92,20 +99,17 @@ int main(int argc, char* argv[]) {
     //------------------------------------------------------------------------------
     //when using the confidence interval, we want to execute at least MIN_NUM_OF_TRIALS
     timer.start();
-    montecarlo_simulation_cpu(num_of_tests,max_cores,min_cores,rows,cols,wl,&sumTTF,&sumTTFX2);
+    montecarlo_simulation_cpu(&num_of_tests,max_cores,min_cores,rows,cols,wl,confInt,thr,numTest,&sumTTF,&sumTTFX2);
     timer.stop();
-
+   
     //----CALCULATE OTHER RESULTS-----------
     //std::cout<<"SumTTF : \t"<<sumTTF<<"\n";
-    mean = sumTTF / (double) (num_of_tests + 1); //do consider that i is incremented later
+    mean = sumTTF / (double) (num_of_tests); //do consider that i is incremented later
     var = sumTTFX2 / (double) (num_of_tests) - mean * mean;
-    ciSize = Zinv * sqrt(var / (double) (num_of_tests + 1));
-   
+    ciSize = Zinv * sqrt(var / (double) (num_of_tests));
     //------------------------------------------------------------------------------
     //---------Display Results------------------------------------------------------
     //------------------------------------------------------------------------------
-    if (!numTest)
-        num_of_tests = i;
     double curr_alives = num_of_tests;
     double prec_time = 0;
     double mttf_int = (sumTTF / num_of_tests);
@@ -135,7 +139,7 @@ int main(int argc, char* argv[]) {
     std::cout << "Coefficient of variation: " << (sqrt(var) / mean) << std::endl;
     std::cout << "Confidence interval: " << mean - ciSize << " " << mean + ciSize << std::endl;
     */
-    std::cout<<rows<<","<<cols<<","<<rows*cols<<","<<min_cores<<","<<wl<<","<<((double) timer.getTime())<<"\n";
+    std::cout<<rows<<","<<cols<<","<<rows*cols<<","<<min_cores<<","<<wl<<","<<num_of_tests<<","<<ciSize<<","<<((double) timer.getTime())<<","<<mttf_int<<","<<(mttf_int / (24 * 365))<<"\n";
     benchmark.set_results(mttf_int,timer.getTime(),mean,var,ciSize);
     benchmark.save_results("benchmark.txt");
     return 0;

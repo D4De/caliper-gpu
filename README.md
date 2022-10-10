@@ -1,7 +1,7 @@
 # Caliper-GPU-version
 
-## News features:
-
+## Parameters:
+  ./caliper [Rows][Cols][Min Cores Alive][Initial Workload][-c {*conf interval*} {*stop threshold*}]
 ## IDEAS:
 * Remove the TempModel huge file and build it real time
 * Use Simple Grid of threads and atomicAdd (Stupid version)

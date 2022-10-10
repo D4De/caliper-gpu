@@ -66,10 +66,8 @@ $(STATISTICS_CPU_FILE):
 
 buid_folders:
 	mkdir -p $(CPU_BUILD_PATH)
-
 $(CALIPER_CPU_EX): buid_folders $(CALIPER_OBJ) 
 	#------START Caliper CPU build------
-	rm caliper $(CALIPER_EX)
 	$(CXX) $(CALIPER_OBJ) $(LDFLAGS) -o $@
 	#------END   Caliper CPU build------
 
@@ -86,4 +84,5 @@ $(CALIPER_OBJ) : $(CALIPER_SRC)
 	$(CXX) $(CFLAGS) $< -o $@
 
 clean:
-	rm -rf src/*.o $(CALIPER_EX) $(THERMAL_EX) 
+	rm -rf caliper $(CALIPER_EX)
+	rm -rf build/cpu/*.o $(CALIPER_EX) $(THERMAL_EX) 

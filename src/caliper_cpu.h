@@ -4,7 +4,10 @@
     #include "./utils.h"
 #endif
 
-void montecarlo_simulation_cpu(int num_of_tests,int max_cores,int min_cores,int rows,int cols, double wl, double * sumTTF,double * sumTTFx2){
+#define FIXED_NUM_TEST true
+#define USE_CONFIDENCE false
+
+void montecarlo_simulation_cpu(long* num_of_tests,int max_cores,int min_cores,int rows,int cols, double wl,double confInt,double stop_threshold,bool fixed_num_test,double * sumTTF,double * sumTTFx2){
    
     //-------------------------------------------------
     //----Variables Declaration------------------------
@@ -16,6 +19,8 @@ void montecarlo_simulation_cpu(int num_of_tests,int max_cores,int min_cores,int 
     
     int i;
     int left_cores;
+    double ciSize,mean,var,Zinv,th;
+
     //-------------------------------------------------
     //----Allocate Memory------------------------------
     //-------------------------------------------------
@@ -25,12 +30,16 @@ void montecarlo_simulation_cpu(int num_of_tests,int max_cores,int min_cores,int 
     alives  = (bool*)   malloc(sizeof(bool)* rows * cols);
 
     //--------------------------------------------------
+    //----Confidence Intervall Setup--------------------
+    //--------------------------------------------------
+    Zinv = invErf(0.5 + confInt / 100.0 / 2);
+    stop_threshold = stop_threshold / 100.0 / 2; // half of the threshold
+
+    //--------------------------------------------------
     //---Montecarlo Simulation--------------------------
     //--------------------------------------------------
-
-
     //TODO PUT again THE "level of confidence as possible stop condition"
-    for (i = 0;i < num_of_tests; i++) {
+    for (i = 0;(fixed_num_test && (i < *num_of_tests)) || (!fixed_num_test && ((i < MIN_NUM_OF_TRIALS) || (ciSize / mean > stop_threshold))); i++) {
         double random;
         double stepT;
         int minIndex;
@@ -123,5 +132,12 @@ void montecarlo_simulation_cpu(int num_of_tests,int max_cores,int min_cores,int 
     //---------UPDATE Stats----------------- 
     *sumTTF     += totalTime;
     *sumTTFx2   += totalTime * totalTime;
+    mean = *sumTTF / (double) (i + 1); //do consider that i is incremented later
+    var = *sumTTFx2 / (double) (i) - mean * mean;
+    ciSize = Zinv * sqrt(var / (double) (i + 1));
+    *num_of_tests = i;//Final num of test
     }
+    i=0;
+
+    
 }
