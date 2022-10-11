@@ -135,6 +135,7 @@ void montecarlo_simulation_cpu(long* num_of_tests,int max_cores,int min_cores,in
     mean = *sumTTF / (double) (i + 1); //do consider that i is incremented later
     var = *sumTTFx2 / (double) (i) - mean * mean;
     ciSize = Zinv * sqrt(var / (double) (i + 1));
+    //https://www.omnicalculator.com/statistics/confidence-interval#:~:text=Compute%20the%20standard%20error%20as,to%20obtain%20the%20confidence%20interval.
     *num_of_tests = i;//Final num of test
     }
     i=0;
