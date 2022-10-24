@@ -1,14 +1,12 @@
 #ifndef CALIPER_GPU
 #define CALIPER_GPU
+    #define CUDA
     #include "cuda_helper.h"
     #include "./thermal_model.h"
     #include "./benchmark_helper.h"
     #include "./utils.h"
-#endif
-
+    #include "cuda_helper.h"
 //#define debugMSG(msg) if(printf(msg)
-
-#if defined(CUDA) //To avoid errors if compiling with GCC
 
 
 __global__ void init(unsigned int seed, curandState_t *states){
@@ -60,21 +58,57 @@ __global__ void tempModel_gpu(double* loads, double* temps,bool* alives,float di
                 temps[i*cols+j] = ENV_TEMP + loads[i*cols+j] * SELF_TEMP + temp;
     }
 
+}
+__device__ void warpReduce(volatile unsigned int *input,size_t threadId, size_t dim)
+{
+	input[threadId] += input[threadId + 32];
+	input[threadId] += input[threadId + 16];
+	input[threadId] += input[threadId + 8];
+	input[threadId] += input[threadId + 4];
+	input[threadId] += input[threadId + 2];
+	input[threadId] += input[threadId + 1];
+}
 
+__device__ unsigned int accumulate(unsigned int *input, size_t dim)
+{
+	size_t threadId = threadIdx.x;
+	if (dim > 32)
+	{
+		for (size_t i = dim / 2; i > 32; i >>= 1)
+		{
+			
+            if (threadId  < i)
+            {
+                input[threadId] += input[threadId + i];
+            }
+            __syncthreads();
+        }
+	}
+	if (threadId < 32)
+		warpReduce(input, threadId, dim);
+	__syncthreads();
+	return input[0];
 }
 
 __global__ void montecarlo_simulation_cuda(curandState_t *states, int num_of_tests,int max_cores,int min_cores,int rows,int cols, float wl,float * sumTTF_res,float * sumTTFx2_res){
  
     unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
         
+    //extern __shared__ unsigned int tmp_sumTTF[];
+    //extern __shared__ unsigned int tmp_sumTTFx2[]; //??? dont know if necessary
+    extern __shared__ unsigned int partial_sumTTF[];
+    partial_sumTTF[threadIdx.x] = 0;
+
     if(tid<num_of_tests){
+        
+
         double random;
         int left_cores;
         double currR[ROWS*COLS];
         double stepT;
         int minIndex;
         double totalTime;
-        bool alives[ROWS*COLS];
+        bool alives[ROWS*COLS]; //TODO allocate those array on global memory on host side
         int j;
         double t, eqT;
         double loads[ROWS*COLS];
@@ -117,9 +151,8 @@ __global__ void montecarlo_simulation_cuda(curandState_t *states, int num_of_tes
                     //Random  is in range [0 : currR[j]]
                     random =(double)curand_uniform(&states[tid])* currR[j]; //current core will potentially die when its R will be equal to random. drand48() generates a number in the interval [0.0;1.0)
                     double alpha = getAlpha(temps[j]);
-                    double alpha_rounded = round1(alpha);
-                    t = alpha_rounded * pow(-log(random), (double) 1 / BETA); //elapsed time from 0 to obtain the new R value equal to random
-                    eqT = alpha_rounded * pow(-log(currR[j]), (double) 1 / BETA); //elapsed time from 0 to obtain the previous R value
+                    t = alpha * pow(-log(random), (double) 1 / BETA); //elapsed time from 0 to obtain the new R value equal to random
+                    eqT = alpha * pow(-log(currR[j]), (double) 1 / BETA); //elapsed time from 0 to obtain the previous R value
                     t = t - eqT;
 
                     //EQT > t some times... WHY??? (Overflow? Error? Random function?)
@@ -150,7 +183,9 @@ __global__ void montecarlo_simulation_cuda(curandState_t *states, int num_of_tes
                 //printf("\nDead core: \t%d (%f)->%f [%f]\n",minIndex,stepT,totalTime,alpha);
             }
         //---------UPDATE TOTAL TIME----------------- 
-            totalTime = totalTime + stepT; //Current simulation time
+            //Current simulation time
+            //partial_sumTTF[threadIdx.x] = partial_sumTTF[threadIdx.x] + stepT;
+            totalTime = totalTime + stepT;
         //---------UPDATE Configuration----------------- 
             if (left_cores > min_cores) {
                 alives[minIndex] = false;
@@ -158,15 +193,25 @@ __global__ void montecarlo_simulation_cuda(curandState_t *states, int num_of_tes
                 for (j = 0; j < max_cores; j++) {
                     if (alives[j]) {
                     		double alpha = getAlpha(temps[j]);
-                    		double alpha_rounded = round1(alpha);
-                            eqT = alpha_rounded * pow(-log(currR[j]), (double) 1 / BETA); //TODO: fixed a buf. we have to use the eqT of the current unit and not the one of the failed unit
-                            currR[j] = exp(-pow((stepT + eqT) / alpha_rounded, BETA));
+                            eqT = alpha * pow(-log(currR[j]), (double) 1 / BETA); //TODO: fixed a buf. we have to use the eqT of the current unit and not the one of the failed unit
+                            currR[j] = exp(-pow((stepT + eqT) / alpha, BETA));
                     }
                 }
             }
             left_cores--; //Reduce number of alive core in this simulation
         }//END SIMULATION-----------------------------
+        //Sync the threads
         __syncthreads();
+        
+        //Acccumulate the result
+        //accumulate(partial_sumTTF,blockDim.x);
+
+        //Add the partial result of this block to the final result
+        __syncthreads();
+        if(threadIdx.x == 0){
+            //atomicAdd(sumTTF_res,partial_sumTTF[0]);
+        }
+        
         atomicAdd(sumTTF_res,(float)totalTime); //sumTTF += totaltime
         atomicAdd(sumTTFx2_res,(float)totalTime *  (float)totalTime); //sumTTFx2 += totaltime * totaltime
         
@@ -182,9 +227,9 @@ __global__ void montecarlo_simulation_cuda(curandState_t *states, int num_of_tes
     }
 }
 
-void montecarlo_simulation_cuda_host(curandState_t *states, int num_of_tests,int max_cores,int min_cores,int rows,int cols, float wl,float * sumTTF_res,float * sumTTFx2_res){
+void montecarlo_simulation_cuda_host(curandState_t *states, int num_of_tests,int max_cores,int min_cores,int rows,int cols, float wl,float * sumTTF_res,float * sumTTFx2_res)
  {
-    
+    //TODO contain all the malloc/necessary code to call the kernel
  }
 
 #endif

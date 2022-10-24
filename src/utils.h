@@ -13,23 +13,11 @@
 #include <getopt.h>
 #include <set>
 #include <unistd.h>
-#include "cuda_helper.h"
 
 
 #define EMPTY_SET "#"
 #define MAKE_STRING( msg )  ( ((std::ostringstream&)((std::ostringstream() << '\x0') << msg)).str().substr(1) )
-//__device__ __host__ 
-//ROUND TO 6 digit
-double round1(double n){
-	int k = 0;
-	while(n<100000){
-		k++;
-		n *= 10.0;
-	}
-	n = round(n);
-	n /= pow(10, k);
-	return n;
-}
+
 
 double invErf(double f) {
 // inverts the gaussian distribution N(0,1) using the bisection method

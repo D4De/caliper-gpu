@@ -48,11 +48,11 @@ BENCHMARK_SCRIPT=./run-benchmark.sh
 #--------MAKEFILE COMMANDS---------------
 #----------------------------------------
 
-all: clean cpu #gpu
+all: clean cpu gpu
 #gpu: $(CALIPER_GPU_EX)
 cpu: $(CALIPER_CPU_EX)
 gpu:
-	nvcc -m64 -gencode $(ARCHITECTURE_FLAG) -rdc=true -lcudadevrt  -o gpu_exec ./src/caliper_gpu.cu
+	nvcc -m64 -gencode $(ARCHITECTURE_FLAG) -rdc=true -lcudadevrt  ./src/caliper_gpu.cu -o gpu_exec 
 
 
 statistics:clean-statistics $(STATISTICS_CPU_FILE)

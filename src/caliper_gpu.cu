@@ -15,10 +15,13 @@ Neither the name of Politecnico di Milano nor the names of its contributors may 
 
 //CUSTOM HEADERS:
 #define CUDA
-#include "caliper_gpu.h"
 #include "caliper_cpu.h"
-#define BLOCK_DIM 256
+#include "caliper_gpu.h"
+#include "utils.h"
+#include "benchmark_helper.h"
 
+
+#define BLOCK_DIM 256
 
 int main(int argc, char* argv[]) {
     int left_cores, min_cores = 0, tmp_min_cores, max_cores;
@@ -28,15 +31,13 @@ int main(int argc, char* argv[]) {
 
     bool isGPU = false;
     char* outputfilename = NULL;
-    bool numTest = false;
+    bool numTest = true;
 
-    unsigned short randomSeed[3] = { 23, 132, 222 };
+    unsigned short randomSeed[3] = { 0, 0, 0 };
     double confInt = 0, thr = 0;
     
     int cols,rows;
     double wl;
-    double *loads;
-    double *temps;
 
     //TODO Inizialize Loads using params from user
 
@@ -48,27 +49,22 @@ int main(int argc, char* argv[]) {
     min_cores       = atoi(argv[3]);
     max_cores       = rows * cols;
     wl              = atof(argv[4]);
+    
+    //Use confidence intervall
+    if(argc > 5 && argv[5][1] == 'c')
+    {
+        confInt = atof(argv[6]);
+        thr = atof(argv[7]);
+        numTest = false;
+    }
 
-    if(argv[5][1] == 'g'){
+    //Use GPU
+    if(argc > 5 &&  argv[5][1] == 'g'){
         isGPU = true;
     }
 
-    if(strcmp(argv[5],"-o")){
-        outputfilename  = argv[6];
-    }
-    
-    //-------------------------------------------------
-    //----Allocate Memory------------------------------
-    //-------------------------------------------------
-    loads = (double*) malloc(sizeof(double)* rows * cols);
-    temps = (double*) malloc(sizeof(double)* rows * cols);
-
     benchmark_results benchmark(rows,cols,min_cores,wl);
     benchmark_timer timer = benchmark_timer();
-
-	//-------------------------------------------------
-    //-----Check QUOS constraint-----------------------
-    //-------------------------------------------------
 
     //check both stopping threshold and confidence interval are set if 1 is false
     if (!numTest && (confInt == 0 || thr == 0)) {
@@ -102,15 +98,20 @@ int main(int argc, char* argv[]) {
     double ciSize = 0; // current size of the confidence interval
     double mean;   // current mean of the distribution
     double var;	   // current variance of the distribution
+    //printf("ZINV: %f\n",Zinv);
 
     //------------------------------------------------------------------------------
     //----------Run Monte Carlo Simulation------------------------------------------
     //------------------------------------------------------------------------------
-   
-    if(isGPU){
-
+    //when using the confidence interval, we want to execute at least MIN_NUM_OF_TRIALS
+    if(!isGPU){
+        timer.start();
+        montecarlo_simulation_cpu(&num_of_tests,max_cores,min_cores,rows,cols,wl,confInt,thr,numTest,&sumTTF,&sumTTFX2);
+        timer.stop();
+    }else{
+        printDeviceInfo();
         //TODO: Put all this Code inside a host function
-        std::cout<<"EXECUTED ON GPU:"<<std::endl;
+        //std::cout<<"EXECUTED ON GPU:"<<std::endl;
 
         //----CUDA variables:------------
         float *sumTTF_GPU;   //GPU result sumTTF
@@ -133,7 +134,7 @@ int main(int argc, char* argv[]) {
         cudaDeviceSynchronize();
         CHECK_KERNELCALL();
         timer.start();
-        //Execute Montecarlo simulation on GPU
+        //Execute Montecarlo simulation on GPU//,BLOCK_DIM*sizeof(unsigned int)
         montecarlo_simulation_cuda<<<blocksPerGrid,threadsPerBlock>>>(states,num_of_tests,max_cores,min_cores,rows,cols,wl,sumTTF_GPU,sumTTFx2_GPU);
         cudaDeviceSynchronize();
         CHECK_KERNELCALL();
@@ -147,25 +148,19 @@ int main(int argc, char* argv[]) {
         //----FREE CUDA MEMORY------------------
         CHECK(cudaFree(sumTTF_GPU));
         CHECK(cudaFree(states));
-        
-    }else{
-        //when using the confidence interval, we want to execute at least MIN_NUM_OF_TRIALS
-        timer.start();
-        montecarlo_simulation_cpu(num_of_tests,max_cores,min_cores,rows,cols,wl,&sumTTF,&sumTTFX2);
-        timer.stop();
+        cudaDeviceReset();
     }
-
+    
+    
     //----CALCULATE OTHER RESULTS-----------
-    std::cout<<"SumTTF : \t"<<sumTTF<<"\n";
-    mean = sumTTF / (double) (num_of_tests + 1); //do consider that i is incremented later
-    var = sumTTFX2 / (double) (num_of_tests) - mean * mean;
-    ciSize = Zinv * sqrt(var / (double) (num_of_tests + 1));
-   
+    //std::cout<<"SumTTF : \t"<<sumTTF<<"\n";
+    mean = sumTTF / (double) (num_of_tests); //do consider that num_of_tests is equal to i at end cycle 
+    var = sumTTFX2 / (double) (num_of_tests-1) - mean * mean;
+    ciSize = Zinv * sqrt(var / (double) (num_of_tests));
+    //printf("CiSize[%d]: %f\n",num_of_tests,ciSize);
     //------------------------------------------------------------------------------
     //---------Display Results------------------------------------------------------
     //------------------------------------------------------------------------------
-    if (!numTest)
-        num_of_tests = i;
     double curr_alives = num_of_tests;
     double prec_time = 0;
     double mttf_int = (sumTTF / num_of_tests);
@@ -185,7 +180,7 @@ int main(int argc, char* argv[]) {
         outfile.close();
     }
 
-    std::cout << "SumTTF: " <<sumTTF<< std::endl;
+    /*std::cout << "SumTTF: " <<sumTTF<< std::endl;
     std::cout << "MTTF: " << mttf_int << " (years: " << (mttf_int / (24 * 365)) << ") " << mttf_int1 << std::endl;
     std::cout << "Exec time: " << ((double) timer.getTime())<< std::endl;
     std::cout << "Number of tests performed: " << num_of_tests << std::endl;
@@ -194,8 +189,8 @@ int main(int argc, char* argv[]) {
     std::cout << "Standard Deviation: " << sqrt(var) << std::endl;
     std::cout << "Coefficient of variation: " << (sqrt(var) / mean) << std::endl;
     std::cout << "Confidence interval: " << mean - ciSize << " " << mean + ciSize << std::endl;
-
-    
+    */
+    std::cout<<rows<<","<<cols<<","<<rows*cols<<","<<min_cores<<","<<wl<<","<<num_of_tests<<","<<ciSize<<","<<((double) timer.getTime())<<","<<mttf_int<<","<<(mttf_int / (24 * 365))<<"\n";
     benchmark.set_results(mttf_int,timer.getTime(),mean,var,ciSize);
     benchmark.save_results("benchmark.txt");
     return 0;

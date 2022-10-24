@@ -21,7 +21,7 @@
 
 #define NTESTS 100000 //With 100k more the result converge
 #define BETA 2
-#define MIN_NUM_OF_TRIALS 30
+#define MIN_NUM_OF_TRIALS 100
 
 #define RANDOMSEED_STR "RANDOM"
 
@@ -29,7 +29,9 @@
 #define INV_ERF_ACCURACY 10e-6
 //__device__ __host__ 
 
-
+#ifdef CUDA
+__device__ __host__ 
+#endif
 void tempModel(double *loads, double* temps, int rows, int cols) {
     double temp;
     int i, j, k, h;
@@ -43,4 +45,8 @@ void tempModel(double *loads, double* temps, int rows, int cols) {
             temps[i*cols+j] = ENV_TEMP + loads[i*cols+j] * SELF_TEMP + temp;
         }
 }
+
+
+
+
 #endif //THERMAL_MODEL

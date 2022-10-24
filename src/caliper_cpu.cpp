@@ -19,6 +19,7 @@ Neither the name of Politecnico di Milano nor the names of its contributors may 
 #include "utils.h"
 #include "benchmark_helper.h"
 #include "caliper_cpu.h"
+
 #define BLOCK_DIM 128
 
 int main(int argc, char* argv[]) {
@@ -48,14 +49,18 @@ int main(int argc, char* argv[]) {
     max_cores       = rows * cols;
     wl              = atof(argv[4]);
     
+    //Use confidence intervall
     if(argc > 5 && argv[5][1] == 'c')
     {
         confInt = atof(argv[6]);
         thr = atof(argv[7]);
         numTest = false;
     }
-    //outputfilename  = argv[5];
-    
+
+    //Use GPU
+    if(argc > 5 &&  argv[5][1] == 'g'){
+        isGPU = true;
+    }
 
     benchmark_results benchmark(rows,cols,min_cores,wl);
     benchmark_timer timer = benchmark_timer();
@@ -92,7 +97,7 @@ int main(int argc, char* argv[]) {
     double ciSize = 0; // current size of the confidence interval
     double mean;   // current mean of the distribution
     double var;	   // current variance of the distribution
-
+    //printf("ZINV: %f\n",Zinv);
 
     //------------------------------------------------------------------------------
     //----------Run Monte Carlo Simulation------------------------------------------
@@ -102,11 +107,14 @@ int main(int argc, char* argv[]) {
     montecarlo_simulation_cpu(&num_of_tests,max_cores,min_cores,rows,cols,wl,confInt,thr,numTest,&sumTTF,&sumTTFX2);
     timer.stop();
    
+    
+    
     //----CALCULATE OTHER RESULTS-----------
     //std::cout<<"SumTTF : \t"<<sumTTF<<"\n";
-    mean = sumTTF / (double) (num_of_tests); //do consider that i is incremented later
-    var = sumTTFX2 / (double) (num_of_tests) - mean * mean;
+    mean = sumTTF / (double) (num_of_tests); //do consider that num_of_tests is equal to i at end cycle 
+    var = sumTTFX2 / (double) (num_of_tests-1) - mean * mean;
     ciSize = Zinv * sqrt(var / (double) (num_of_tests));
+    //printf("CiSize[%d]: %f\n",num_of_tests,ciSize);
     //------------------------------------------------------------------------------
     //---------Display Results------------------------------------------------------
     //------------------------------------------------------------------------------
