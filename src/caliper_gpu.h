@@ -76,15 +76,16 @@ __device__ void warpReduce(volatile float *input,size_t threadId)
 	input[threadId] += input[threadId + 2];
 	input[threadId] += input[threadId + 1];
 }
-__device__ float accumulate(unsigned int *input, size_t dim)
+__device__ float accumulate(float *input, size_t dim,int num_of_elem)
 {
+    unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
 	size_t threadId = threadIdx.x;
 	if (dim > 32)
 	{
 		for (size_t i = dim / 2; i > 32; i >>= 1)
 		{
-			
-            if (threadId  < i)
+
+            if ((threadId  < i))//&& (tid + i < num_of_elem) -> those elements are initialized to 0 so not relevant
             {
                 input[threadId] += input[threadId + i];
             }
@@ -94,6 +95,10 @@ __device__ float accumulate(unsigned int *input, size_t dim)
 	if (threadId < 32)
 		warpReduce(input, threadId);
 	__syncthreads();
+
+    if (threadId == 0){
+        //printf("Partial Result = %f\n",input[0]);
+    }
 	return input[0];
 }
 __global__ void collect_res_gpu(float *input,float* result, int numOfBlocks) // compute the final reduction
@@ -104,12 +109,12 @@ __global__ void collect_res_gpu(float *input,float* result, int numOfBlocks) // 
     unsigned int tid = threadIdx.x + blockDim.x*blockIdx.x;
     unsigned i;
     __shared__ float localVars[1024];   //Max num possible num of blocks
-    localVars[tid]=input[tid];//Save input in shared memory
-    __syncthreads();
-    localVars[tid +  numOfBlocks/2] = input[tid +  numOfBlocks/2];
+    //Each thread Save in shared mem-> element in first and second half
+    localVars[tid]                  =   input[tid];
+    localVars[tid +  numOfBlocks/2] =   input[tid +  numOfBlocks/2];
     __syncthreads();
 
-    if(tid < numOfBlocks/2){
+    if(tid <= numOfBlocks/2){
         //IF Remaining cells are more then 32
         for (i = numOfBlocks / 2; i > 32; i >>= 1) // compute the parallel reduction for the collected data
         {
@@ -126,8 +131,11 @@ __global__ void collect_res_gpu(float *input,float* result, int numOfBlocks) // 
             warpReduce(localVars,tid);
         __syncthreads();
 
-        if(tid==0)
+        if(tid==0){
             *result = localVars[tid];
+            printf("RES: %f\n",localVars[tid]/100000.0);
+        }
+            
         __syncthreads();
     }    
 }
@@ -151,8 +159,9 @@ __global__ void montecarlo_simulation_cuda(simulation_state sim_state,curandStat
     int offset = tid * (rows * cols);
     //extern __shared__ unsigned int tmp_sumTTF[];
     //extern __shared__ unsigned int tmp_sumTTFx2[]; //??? dont know if necessary
-    extern __shared__ unsigned int partial_sumTTF[];
+    extern __shared__ float partial_sumTTF[];
     
+    sumTTF_res[blockIdx.x] = 0;
     partial_sumTTF[threadIdx.x] = 0;
 
     if(tid<num_of_tests){
@@ -169,21 +178,6 @@ __global__ void montecarlo_simulation_cuda(simulation_state sim_state,curandStat
         float* temps   = sim_state.temps;
         bool*  alives  = sim_state.alives; //TODO allocate those array on global memory on host side
         int*   indexes = sim_state.indexes;
-
-        /*
-       currR   = (double*) malloc(rows*cols    * sizeof(double));
-        loads   = (double*) malloc(rows*cols    * sizeof(double));
-        temps   = (double*) malloc(rows*cols    * sizeof(double));
-        alives  = (bool*)   malloc(rows*cols    * sizeof(bool));
-        inde xes = (int*)    malloc(rows*cols    * sizeof(int));
-        
-
-        double currR[300];
-        double loads[300];
-        double temps[300];
-        bool alives[300]; //TODO allocate those array on global memory on host side
-        int indexes[300];
-        */
 
         left_cores = max_cores;
         totalTime = 0;
@@ -217,8 +211,9 @@ __global__ void montecarlo_simulation_cuda(simulation_state sim_state,curandStat
             int block_dim = 256;
             //TODO optimize tempModel by computing temp only of alive cores
             //CHECK HOW DYNAMICALY ALLOCATE ARRAY INSIDE KERNEL (into registers and not global memory)
-           tempModel(loads, temps, rows, cols,offset);
-
+           //tempModel(loads, temps,indexes,left_cores, rows, cols,offset);
+            tempModel(loads, temps, rows, cols,offset);
+            
             int row_blocks = (rows+block_dim-1)/block_dim;
             int col_blocks = (cols+block_dim-1)/block_dim;
             dim3 blocksPerGrid(row_blocks,col_blocks,1);
@@ -236,10 +231,6 @@ __global__ void montecarlo_simulation_cuda(simulation_state sim_state,curandStat
                 eqT = alpha * pow(-log(currR[index]), (double) 1 / BETA); //elapsed time from 0 to obtain the previous R value
                 t = t - eqT;
 
-                if(tid==1){
-                    //printf("%d -> Death Time: %f ->(%f)(%f) -- [%f][%f][%f]\n",j,t,random,currR[j],alpha_rounded,temps[j],loads[j]);
-                }
-
                 //the difference between the two values represents the time elapsed from the previous failure to the current failure
                 //(we will sum to the total time the minimum of such values)
                     
@@ -252,10 +243,6 @@ __global__ void montecarlo_simulation_cuda(simulation_state sim_state,curandStat
             if (minIndex == -1) {
                 //TODO HOW THROW ERRORS IN CUDA?????
                 return;
-            }
-            if(tid==1){
-                //double alpha = getAlpha(temps[minIndex]);
-                //printf("\nDead core: \t%d (%f)->%f [%f]\n",minIndex,stepT,totalTime,alpha);
             }
         //---------UPDATE TOTAL TIME----------------- 
             //Current simulation time
@@ -276,11 +263,10 @@ __global__ void montecarlo_simulation_cuda(simulation_state sim_state,curandStat
             left_cores--; //Reduce number of alive core in this simulation
         }//END SIMULATION-----------------------------
         //Sync the threads
-
         __syncthreads();
         
         //Acccumulate the results of this block
-        accumulate(partial_sumTTF,blockDim.x);
+        accumulate(partial_sumTTF,blockDim.x,num_of_tests);
 
         //Add the partial result of this block to the final result
         __syncthreads();
@@ -290,7 +276,7 @@ __global__ void montecarlo_simulation_cuda(simulation_state sim_state,curandStat
             //USING ATOMIC ADD-> SAME RESULT AS CPU, WITH GLOBAL REDUCE.... NOT:.. CHECK WHY
             
             //Each Thread 0 assign to his block cell the result of its accumulate
-            sumTTF_res[blockIdx.x] = (float)partial_sumTTF[0]; //Each block save its result in its "ID"
+            sumTTF_res[blockIdx.x] = partial_sumTTF[0]; //Each block save its result in its "ID"
         }
         
         //TODO ACCUMULATE ALSO SUMTTFx2
@@ -312,6 +298,24 @@ void allocate_simulation_state_on_device(simulation_state* state,int rows,int co
     CHECK(cudaMalloc(&state->alives   , cells*sizeof(bool)));   //alives
 }
 
+/**
+ * Free all the Global memory allocated for the simulation state
+*/
+void free_simulation_state(simulation_state* state){
+    CHECK(cudaFree(state->currR));
+    CHECK(cudaFree(state->temps));
+    CHECK(cudaFree(state->loads));
+    CHECK(cudaFree(state->indexes));
+    CHECK(cudaFree(state->alives));
+}
+
+/**
+ * -Preparation and launch of Simulation
+ * -Allocate Global Memory
+ * -Initialize random State
+ * -Launch Simulation
+ * -Collect results from global mem
+*/
 void montecarlo_simulation_cuda_launcher(int num_of_tests,int max_cores,int min_cores,int rows,int cols, float wl,double * sumTTF,double * sumTTFx2,int block_dim)
  {
     //TODO contain all the malloc/necessary code to call the kernel
@@ -358,6 +362,7 @@ void montecarlo_simulation_cuda_launcher(int num_of_tests,int max_cores,int min_
         //----FREE CUDA MEMORY------------------
         CHECK(cudaFree(sumTTF_GPU));
         CHECK(cudaFree(states));
+        free_simulation_state(&sim_state);
         cudaDeviceReset();
  }
 

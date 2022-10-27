@@ -1,5 +1,6 @@
 #ifndef THERMAL_MODEL
 #define THERMAL_MODEL
+#include <iostream>
 #define ROWS 20
 #define COLS 20
 
@@ -62,6 +63,39 @@ void tempModel(float *loads, float* temps, int rows, int cols,int offset) {
                     }
             temps[offset + i*cols+j] = ENV_TEMP + loads[offset + i*cols+j] * SELF_TEMP + temp;
         }
+}
+
+#ifdef CUDA
+__device__ __host__ 
+#endif
+void tempModel(float *loads, float* temps,int* indexes,int left_alive, int rows, int cols,int offset) {
+
+    float temp;
+    int i, j, k, h;
+    int max_cores = rows*cols;
+
+    for(int i=0;i<left_alive;i++){
+        float temp = 0;
+
+        int curr_index = indexes[offset + i];
+        int relative_curr_index = curr_index - offset;
+
+        //Since i know the original index of alive cores, we want to retrive also its original (row,col) coordinate
+        int r = relative_curr_index/cols; //Relative position on rows
+        int c = relative_curr_index%cols; //Relative position on cols
+        
+        for (k = -1; k < 2; k++)
+        {
+            for (h = -1; h < 2; h++)
+            {
+                if ((k != 0 || h != 0) && k != h && k != -h && i + k >= 0 && i + k < rows && j + h >= 0 && j + h < cols){
+                        temp += loads[offset + (r + k)*cols + (c + h)] * NEIGH_TEMP;
+                }
+            }
+        }
+
+        temps[curr_index] = ENV_TEMP + loads[curr_index] * SELF_TEMP + temp;
+    }
 }
 
 #endif //THERMAL_MODEL
