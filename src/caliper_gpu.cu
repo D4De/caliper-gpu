@@ -122,52 +122,11 @@ int main(int argc, char* argv[]) {
         timer.stop();
     }else{
         //printDeviceInfo();
-        //TODO: Put all this Code inside a host function
-        //std::cout<<"EXECUTED ON GPU:"<<std::endl;
-
-        //----CUDA variables:------------
-        float *sumTTF_GPU;   //GPU result sumTTF
-        float *sumTTF_GPU_final;   //GPU result sumTTF
-        float *sumTTFx2_GPU; //GPU result sumTTFx2
-        float res;
-        curandState_t *states;
-        int num_of_blocks = (num_of_tests+BLOCK_DIM-1)/BLOCK_DIM;
-        //----MEMORY ALLOCATION:---------
-        CHECK(cudaMalloc(&sumTTF_GPU    , num_of_blocks*sizeof(float)));   //Allocate Result memory
-        CHECK(cudaMalloc(&sumTTFx2_GPU  , sizeof(float))); //Allocate Result memory
-        CHECK(cudaMalloc(&states        , num_of_tests*sizeof(curandState_t))); //Random States array
-        CHECK(cudaMalloc(&sumTTF_GPU_final, sizeof(float)));   //Allocate Result memory
-        //----Declare Grid Dimensions:---------
-        dim3 blocksPerGrid(num_of_blocks,1,1);
-        dim3 threadsPerBlock(BLOCK_DIM,1,1);
-
-        //----KERNELS CALL -------------------
-        //Inizialize Random states
-        init<<<blocksPerGrid,threadsPerBlock>>>(time(NULL),states);
-        cudaDeviceSynchronize();
-        CHECK_KERNELCALL();
         timer.start();
-        //Execute Montecarlo simulation on GPU//,
-        montecarlo_simulation_cuda<<<blocksPerGrid,threadsPerBlock,BLOCK_DIM*sizeof(float)>>>(states,num_of_tests,max_cores,min_cores,rows,cols,wl,sumTTF_GPU,sumTTFx2_GPU);
-        CHECK_KERNELCALL();
-        cudaDeviceSynchronize();
-        collect_res_gpu<<<1,num_of_blocks/2>>>(sumTTF_GPU,sumTTF_GPU_final,num_of_blocks);
-        CHECK_KERNELCALL();
-        cudaDeviceSynchronize();
+        montecarlo_simulation_cuda_launcher(num_of_tests,max_cores,min_cores,rows,cols,wl,&sumTTF,&sumTTFX2,BLOCK_DIM);
         timer.stop();
-        //----Copy back results on CPU-----------
-        CHECK(cudaMemcpy(&res, sumTTF_GPU_final, sizeof(unsigned int), cudaMemcpyDeviceToHost));
-        sumTTF = (double) res;
-        CHECK(cudaMemcpy(&res, sumTTFx2_GPU, sizeof(float), cudaMemcpyDeviceToHost));
-        sumTTFX2 = (double) res;
-        
-        //----FREE CUDA MEMORY------------------
-        CHECK(cudaFree(sumTTF_GPU));
-        CHECK(cudaFree(states));
-        cudaDeviceReset();
     }
-    
-    
+
     //----CALCULATE OTHER RESULTS-----------
     //std::cout<<"SumTTF : \t"<<sumTTF<<"\n";
     mean = sumTTF / (double) (num_of_tests); //do consider that num_of_tests is equal to i at end cycle 

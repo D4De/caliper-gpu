@@ -46,7 +46,22 @@ void tempModel(double *loads, double* temps, int rows, int cols) {
         }
 }
 
+#ifdef CUDA
+__device__ __host__ 
+#endif
+void tempModel(float *loads, float* temps, int rows, int cols,int offset) {
 
-
+    float temp;
+    int i, j, k, h;
+    for (i = 0; i < rows; i++)
+        for (j = 0; j < cols; j++) {
+            for (k = -1, temp = 0; k < 2; k++)
+                for (h = -1; h < 2; h++)
+                    if ((k != 0 || h != 0) && k != h && k != -h && i + k >= 0 && i + k < rows && j + h >= 0 && j + h < cols){
+                        temp += loads[offset + (i + k)*cols + (j + h)] * NEIGH_TEMP;
+                    }
+            temps[offset + i*cols+j] = ENV_TEMP + loads[offset + i*cols+j] * SELF_TEMP + temp;
+        }
+}
 
 #endif //THERMAL_MODEL
