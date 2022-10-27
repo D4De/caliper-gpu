@@ -2,10 +2,20 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "CUDA: Debug with CUDA-GDB",
+            "type": "cuda-gdb",
+            "request": "launch",
+            "gdb": "cuda-gdb",
+            "program": "${workspaceFolder}/gpu_exec",
+            "arguments": "11 11 6 0.0495 -g",
+            "envFile": "${workspaceFolder}/.vscode/.env"
+        },
+        {
             "name": "CUDA C++: Launch",
             "type": "cuda-gdb",
             "request": "launch",
-            "program": "./caliper"
+            "program": "${workspaceFolder}/gpu_exec",
+            "envFile": "${workspaceFolder}/.vscode/.env"
         }
     ]
-}
+}//"preLaunchTask": "BUILD-CUDA-DEBUG",

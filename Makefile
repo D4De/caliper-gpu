@@ -52,8 +52,12 @@ all: clean cpu gpu
 #gpu: $(CALIPER_GPU_EX)
 cpu: $(CALIPER_CPU_EX)
 gpu:
-	nvcc -m64 -gencode $(ARCHITECTURE_FLAG) -rdc=true -lcudadevrt  ./src/caliper_gpu.cu -o gpu_exec 
+	nvcc -g -m64 -gencode $(ARCHITECTURE_FLAG) -rdc=true -lcudadevrt  ./src/caliper_gpu.cu -o gpu_exec 
 
+gpu-debug:
+	export CUDA_DEBUGGER_SOFTWARE_PREEMPTION=1
+	nvcc -g -m64 -gencode $(ARCHITECTURE_FLAG) -rdc=true -lcudadevrt  ./src/caliper_gpu.cu -o gpu_exec
+	
 
 statistics:clean-statistics $(STATISTICS_CPU_FILE)
 	#Statistics ended computation

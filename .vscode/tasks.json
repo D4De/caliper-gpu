@@ -2,10 +2,12 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "echo",
+            "label": "BUILD-CUDA-DEBUG",
             "type": "shell",
-            "command": "echo Hello",
-            "problemMatcher": ["$nvcc"],
+            "command": "make gpu-debug",
+            "problemMatcher": [
+                "$nvcc"
+            ],
             "group": {
                 "kind": "build",
                 "isDefault": true

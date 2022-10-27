@@ -50,17 +50,29 @@ int main(int argc, char* argv[]) {
     max_cores       = rows * cols;
     wl              = atof(argv[4]);
     
+    int index_offset = 0;   //This allow to have multiple arguments simply in priority order
     //Use confidence intervall
-    if(argc > 5 && argv[5][1] == 'c')
+
+    
+    if(argc > 5 && argv[5][1] == 'n')           //NUM OF ITERATION
+    {
+        num_of_tests = atoi(argv[6]);
+        numTest = true;
+        index_offset += 2;
+    }else if(argc > 5 && argv[5][1] == 'c')     //CONFIDENCE INTERVALL
     {
         confInt = atof(argv[6]);
         thr = atof(argv[7]);
         numTest = false;
+        index_offset += 3;
     }
 
-    //Use GPU
-    if(argc > 5 &&  argv[5][1] == 'g'){
+    //Use GPU                                   //USE GPU
+    if(argc > 5+index_offset &&  argv[5+index_offset][1] == 'g'){
         isGPU = true;
+        index_offset++;
+
+        //TODO SETUP NUM OF BLOCKS
     }
 
     benchmark_results benchmark(rows,cols,min_cores,wl);
@@ -109,23 +121,24 @@ int main(int argc, char* argv[]) {
         montecarlo_simulation_cpu(&num_of_tests,max_cores,min_cores,rows,cols,wl,confInt,thr,numTest,&sumTTF,&sumTTFX2);
         timer.stop();
     }else{
-        printDeviceInfo();
+        //printDeviceInfo();
         //TODO: Put all this Code inside a host function
         //std::cout<<"EXECUTED ON GPU:"<<std::endl;
 
         //----CUDA variables:------------
         float *sumTTF_GPU;   //GPU result sumTTF
+        float *sumTTF_GPU_final;   //GPU result sumTTF
         float *sumTTFx2_GPU; //GPU result sumTTFx2
         float res;
         curandState_t *states;
-        
+        int num_of_blocks = (num_of_tests+BLOCK_DIM-1)/BLOCK_DIM;
         //----MEMORY ALLOCATION:---------
-        CHECK(cudaMalloc(&sumTTF_GPU  , sizeof(float)));   //Allocate Result memory
-        CHECK(cudaMalloc(&sumTTFx2_GPU, sizeof(float))); //Allocate Result memory
-        CHECK(cudaMalloc(&states, num_of_tests*sizeof(curandState_t))); //Random States array
-
+        CHECK(cudaMalloc(&sumTTF_GPU    , num_of_blocks*sizeof(float)));   //Allocate Result memory
+        CHECK(cudaMalloc(&sumTTFx2_GPU  , sizeof(float))); //Allocate Result memory
+        CHECK(cudaMalloc(&states        , num_of_tests*sizeof(curandState_t))); //Random States array
+        CHECK(cudaMalloc(&sumTTF_GPU_final, sizeof(float)));   //Allocate Result memory
         //----Declare Grid Dimensions:---------
-        dim3 blocksPerGrid((num_of_tests+BLOCK_DIM-1)/BLOCK_DIM,1,1);
+        dim3 blocksPerGrid(num_of_blocks,1,1);
         dim3 threadsPerBlock(BLOCK_DIM,1,1);
 
         //----KERNELS CALL -------------------
@@ -134,13 +147,16 @@ int main(int argc, char* argv[]) {
         cudaDeviceSynchronize();
         CHECK_KERNELCALL();
         timer.start();
-        //Execute Montecarlo simulation on GPU//,BLOCK_DIM*sizeof(unsigned int)
-        montecarlo_simulation_cuda<<<blocksPerGrid,threadsPerBlock>>>(states,num_of_tests,max_cores,min_cores,rows,cols,wl,sumTTF_GPU,sumTTFx2_GPU);
-        cudaDeviceSynchronize();
+        //Execute Montecarlo simulation on GPU//,
+        montecarlo_simulation_cuda<<<blocksPerGrid,threadsPerBlock,BLOCK_DIM*sizeof(float)>>>(states,num_of_tests,max_cores,min_cores,rows,cols,wl,sumTTF_GPU,sumTTFx2_GPU);
         CHECK_KERNELCALL();
+        cudaDeviceSynchronize();
+        collect_res_gpu<<<1,num_of_blocks/2>>>(sumTTF_GPU,sumTTF_GPU_final,num_of_blocks);
+        CHECK_KERNELCALL();
+        cudaDeviceSynchronize();
         timer.stop();
         //----Copy back results on CPU-----------
-        CHECK(cudaMemcpy(&res, sumTTF_GPU, sizeof(float), cudaMemcpyDeviceToHost));
+        CHECK(cudaMemcpy(&res, sumTTF_GPU_final, sizeof(unsigned int), cudaMemcpyDeviceToHost));
         sumTTF = (double) res;
         CHECK(cudaMemcpy(&res, sumTTFx2_GPU, sizeof(float), cudaMemcpyDeviceToHost));
         sumTTFX2 = (double) res;

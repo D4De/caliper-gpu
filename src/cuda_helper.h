@@ -36,7 +36,7 @@ void printDeviceInfo(){
     cudaDeviceProp devProp;
     cudaGetDeviceCount(&devCount);
     cudaGetDeviceProperties(&devProp, 0);
-
+    
     printf("Major revision number: %d\n", devProp.major);
     printf("Minor revision number: %d\n", devProp.minor);
     printf("Name: %s\n", devProp.name);
@@ -46,6 +46,7 @@ void printDeviceInfo(){
            devProp.regsPerBlock);
     printf("Maximum threads per block: %d\n",
            devProp.maxThreadsPerBlock);
+    printf("Warp size %d\n",devProp.warpSize);
     for (int i = 0; i < 3; ++i)
         printf("Maximum dimension %d of block: %d \n", i,
                devProp.maxThreadsDim[i]);

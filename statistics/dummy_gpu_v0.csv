@@ -1,0 +1,19 @@
+ROWS,COLS,NUM OF CORES,MIN_CORE,WORKLOAD,NUM_OF_TEST,CONFIDENCE,EXECUTION TIME,MTTF[Hours],MTTF[Years]
+4,4,16,6,0.375,100000,-nan,0.4575271606,187645.0099,21.42066323
+5,5,25,6,0.24,100000,-nan,1.164530039,324021.3094,36.98873395
+6,6,36,6,0.1666,100000,-nan,2.45255208,455183.1962,51.96155207
+7,7,49,6,0.1224,100000,-nan,4.54517293,572649.2672,65.37092091
+10,10,100,6,0.06,100000,-nan,18.88980198,846032.4864,96.57905096
+11,11,121,6,0.0495,100000,-nan,27.6093719,916350.7302,104.6062477
+15,15,225,6,0.0266,100000,-nan,95.15854788,1131047.076,129.114963
+16,16,256,6,0.0234,100000,-nan,123.1360118,1172531.2,133.8505936
+17,17,289,6,0.0207,100000,-nan,156.848321,1211040.727,138.2466583
+18,18,324,6,0.0185,100000,-nan,197.1027131,1245933.158,142.2298126
+the launch timed out and was terminated in ./src/caliper_gpu.cu at line 155
+the launch timed out and was terminated in ./src/caliper_gpu.cu at line 155
+an illegal memory access was encountered in ./src/caliper_gpu.cu at line 155
+an illegal memory access was encountered in ./src/caliper_gpu.cu at line 155
+an illegal memory access was encountered in ./src/caliper_gpu.cu at line 155
+an illegal memory access was encountered in ./src/caliper_gpu.cu at line 155
+an illegal memory access was encountered in ./src/caliper_gpu.cu at line 155
+an illegal memory access was encountered in ./src/caliper_gpu.cu at line 155
