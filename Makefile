@@ -33,7 +33,7 @@ FLAGS =
 #You can find capability of device on https://developer.nvidia.com/cuda-gpus#compute
 #IN THE FOLLOWING FIELD REPLACE 50 with your GPU capability without the "." so X.X become XX
 #eg: 5.0 -> 50 , 6.1->60 , 7.5 -> 75
-CAPABILITY = 50
+CAPABILITY = 37
 #THE CODE IS EQUAL TO THE ARCHITECTURE CAPABILITY SO MY IS 5.0 so sm_50 and compute_50
 #GENERATING ARCHITECTURE FLAGS--------------- TODO AUTOMATIZE
 CODE = code=sm_$(CAPABILITY)
