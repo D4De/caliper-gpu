@@ -27,8 +27,16 @@
     } \
 }\
 
-#ifndef PrintInfo
-#define PrintInfo
+
+#ifndef CUDA_UTILS_FUNCTIONS
+#define CUDA_UTILS_FUNCTIONS
+
+__global__ void init_random_state(unsigned int seed, curandState_t *states){
+    unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    curand_init(seed, tid, 0, &states[tid]);
+}
+
+
 void printDeviceInfo(){
     std::printf("Query Available devices\n");
 
@@ -56,5 +64,5 @@ void printDeviceInfo(){
            devProp.sharedMemPerMultiprocessor);
     /*... output data visualization ...*/
 }
-#endif
-#endif
+#endif //CUDA_UTILS_FUNCTIONS
+#endif //CUDA

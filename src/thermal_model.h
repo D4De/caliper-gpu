@@ -70,31 +70,27 @@ __device__ __host__
 #endif
 void tempModel(float *loads, float* temps,int* indexes,int left_alive, int rows, int cols,int offset) {
 
-    float temp;
-    int i, j, k, h;
-    int max_cores = rows*cols;
-
     for(int i=0;i<left_alive;i++){
+        int absolute_index = indexes[i + offset];     //contain position of this core in the original grid
+        int relative_index = absolute_index - offset; //local position (usefull only on gpu global memory,for cpu is same as absolute)
+
+        int r = relative_index/cols;    //Row position into local grid
+        int c = relative_index%cols;    //Col position into local grid
+
         float temp = 0;
+        int k,h;
 
-        int curr_index = indexes[offset + i];
-        int relative_curr_index = curr_index - offset;
-
-        //Since i know the original index of alive cores, we want to retrive also its original (row,col) coordinate
-        int r = relative_curr_index/cols; //Relative position on rows
-        int c = relative_curr_index%cols; //Relative position on cols
-        
         for (k = -1; k < 2; k++)
         {
             for (h = -1; h < 2; h++)
             {
-                if ((k != 0 || h != 0) && k != h && k != -h && i + k >= 0 && i + k < rows && j + h >= 0 && j + h < cols){
-                        temp += loads[offset + (r + k)*cols + (c + h)] * NEIGH_TEMP;
+                if ((k != 0 || h != 0) && k != h && k != -h && r + k >= 0 && r + k < rows && c + h >= 0 && c + h < cols){
+                    temp += loads[offset+(r + k)*cols + (c + h)] * NEIGH_TEMP;
                 }
             }
         }
 
-        temps[curr_index] = ENV_TEMP + loads[curr_index] * SELF_TEMP + temp;
+        temps[absolute_index] = ENV_TEMP + loads[absolute_index] * SELF_TEMP + temp;
     }
 }
 

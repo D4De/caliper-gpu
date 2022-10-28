@@ -16,9 +16,9 @@ Neither the name of Politecnico di Milano nor the names of its contributors may 
 //CUSTOM HEADERS:
 
 #include "thermal_model.h"
-#include "utils.h"
-#include "benchmark_helper.h"
-#include "caliper_cpu.h"
+#include "utils/utils.h"
+#include "utils/benchmark_helper.h"
+#include "montecarlo_cpu.h"
 
 #define BLOCK_DIM 128
 
@@ -32,7 +32,7 @@ int main(int argc, char* argv[]) {
     char* outputfilename = NULL;
     bool numTest = true;
 
-    unsigned short randomSeed[3] = { 0, 0, 0 };
+    unsigned short randomSeed[3] = { 33, 0, 0 };
     double confInt = 0, thr = 0;
     
     int cols,rows;

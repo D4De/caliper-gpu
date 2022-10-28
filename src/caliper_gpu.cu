@@ -15,10 +15,10 @@ Neither the name of Politecnico di Milano nor the names of its contributors may 
 
 //CUSTOM HEADERS:
 #define CUDA
-#include "caliper_cpu.h"
-#include "caliper_gpu.h"
-#include "utils.h"
-#include "benchmark_helper.h"
+#include "montecarlo_cpu.h"
+#include "montecarlo_gpu.h"
+#include "utils/utils.h"
+#include "utils/benchmark_helper.h"
 
 
 #define BLOCK_DIM 256
@@ -26,6 +26,7 @@ Neither the name of Politecnico di Milano nor the names of its contributors may 
 int main(int argc, char* argv[]) {
     int left_cores, min_cores = 0, tmp_min_cores, max_cores;
     long num_of_tests = NTESTS;
+    int block_dim = BLOCK_DIM;
     std::map<double, double> results;
     int i;
 
@@ -67,11 +68,23 @@ int main(int argc, char* argv[]) {
         index_offset += 3;
     }
 
+    int gpu_version = 0;
     //Use GPU                                   //USE GPU
     if(argc > 5+index_offset &&  argv[5+index_offset][1] == 'g'){
         isGPU = true;
-        index_offset++;
+        
 
+        if(argc > 6+index_offset ){
+            gpu_version = atoi(argv[6+index_offset]);
+            index_offset++;
+        }
+
+        if(argc > 6+index_offset ){
+            block_dim = atoi(argv[6+index_offset]);
+            index_offset++;
+        }
+        
+        index_offset++;
         //TODO SETUP NUM OF BLOCKS
     }
 
@@ -123,7 +136,7 @@ int main(int argc, char* argv[]) {
     }else{
         //printDeviceInfo();
         timer.start();
-        montecarlo_simulation_cuda_launcher(num_of_tests,max_cores,min_cores,rows,cols,wl,&sumTTF,&sumTTFX2,BLOCK_DIM);
+        montecarlo_simulation_cuda_launcher(num_of_tests,max_cores,min_cores,rows,cols,wl,&sumTTF,&sumTTFX2,block_dim,gpu_version);
         timer.stop();
     }
 
