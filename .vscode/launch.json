@@ -7,7 +7,7 @@
             "request": "launch",
             "gdb": "cuda-gdb",
             "program": "${workspaceFolder}/gpu_exec",
-            "arguments": "11 11 6 0.0495 -g",
+            "arguments": "4 4 6 0.375 -g 1",
             "envFile": "${workspaceFolder}/.vscode/.env"
         },
         {

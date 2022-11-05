@@ -5,3 +5,10 @@
 #define INITIAL_WORKLOAD 0.375
 #define ROWS 4
 #define COLS 4
+
+
+#define VERSION_REDUX           0
+#define VERSION_COALESCED       1
+#define VERSION_STRUCT_SHARED   2
+#define VERSION_DYNAMIC         3
+#define VERSION_2D_GRID         4

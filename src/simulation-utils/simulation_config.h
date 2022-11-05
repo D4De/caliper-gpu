@@ -10,11 +10,11 @@
  * Allow to store the current state of a single core
 */
 struct core_state{
-    float curr_r;
-    float temp;
-    float load;
-    float voltage; //We can add more Death types like Chinese paper
-    int real_index;
+    float curr_r;   //Current Probability to die
+    float temp;     //Temperature of the core
+    float load;     //Work load of this core
+    float voltage;  //We can add more Death types like Chinese paper
+    int real_index; //Real position in the grid
 };
 
 /**
@@ -29,6 +29,8 @@ struct simulation_state{
     float * loads;
     int   * indexes;
     bool  * alives;  //TODO remove alives array
+
+    core_state * core_states;
 
     float   current_workload;
     int     left_cores;
@@ -67,8 +69,16 @@ struct configuration_description{
 /**
  * Allocate Global Memory of gpu to store the simulation state
 */
-void allocate_simulation_state_on_device(simulation_state* state,int rows,int cols,int num_of_iteration){
-    int cells = rows*cols*num_of_iteration;
+void allocate_simulation_state_on_device(simulation_state* state,configuration_description config){
+    int cells = config.rows*config.cols*config.num_of_tests;
+
+    //STRUCT VERSION
+    if(config.gpu_version == VERSION_STRUCT_SHARED){
+        CHECK(cudaMalloc(&state->core_states    , cells*sizeof(core_state)));
+        return;
+    }
+
+    //ALL OTHER VERSION
     CHECK(cudaMalloc(&state->currR    , cells*sizeof(float)));  //CurrR
     CHECK(cudaMalloc(&state->temps    , cells*sizeof(float)));  //temps
     CHECK(cudaMalloc(&state->loads    , cells*sizeof(float)));  //loads
@@ -79,7 +89,15 @@ void allocate_simulation_state_on_device(simulation_state* state,int rows,int co
 /**
  * Free all the Global memory allocated for the simulation state
 */
-void free_simulation_state(simulation_state* state){
+void free_simulation_state(simulation_state* state,configuration_description config){
+
+    //STRUCT VERSION
+    if(config.gpu_version == VERSION_STRUCT_SHARED){
+        CHECK(cudaFree(state->core_states));
+        return;
+    }
+
+    //ALL OTHER VERSIONS
     CHECK(cudaFree(state->currR));
     CHECK(cudaFree(state->temps));
     CHECK(cudaFree(state->loads));
@@ -104,7 +122,20 @@ void setup_config(configuration_description* config,int num_of_tests,int max_cor
     config->useNumOfTest = true;
     config->isGPU  = false;
 }
+/**
+ * Data structure is composed like
+ * [All data 0][All data 1][..][All data N] N is Num of thread/iteration
+ * 
+ * i represent the data position we want to access
+*/
+#ifdef CUDA
+__device__  int getIndex(int i, int N){
 
+    int tid = threadIdx.x + blockDim.x*blockIdx.x; //Identify 
+
+    return tid + N*i; //Get the position of this thread inside the array for "CORE i in the grid"
+}
+#endif
 /**
  * Swap the dead core to the end of the array
  * 
@@ -120,6 +151,34 @@ void swap_core_index(int* cores,int dead_index,int size,int offset){
     cores[offset+size-1] = cores[dead_index]; //Swap dead index to end
     cores[dead_index] = tmp;         
 }
+
+#ifdef CUDA
+__device__ 
+
+void swapState(simulation_state sim_state,int dead_index,int left_cores,int max_cores){
+
+    //Get absolute indexes from relative one
+    int last_elem   = getIndex(left_cores-1,max_cores);
+    int idxToSwap   = getIndex(dead_index,max_cores);
+
+    //Save the Alive core at the end of the list into a tmp val  (COALESCED)
+    int tmp_currR = sim_state.currR[last_elem];
+    int tmp_loads = sim_state.loads[last_elem];
+    int tmp_temps = sim_state.temps[last_elem];
+
+    //Swap dead index to end      (COALESCED WRITE, NON COALESCED READ)
+    sim_state.currR[last_elem] = sim_state.currR[idxToSwap];
+    sim_state.loads[last_elem] = sim_state.loads[idxToSwap];
+    sim_state.temps[last_elem] = sim_state.temps[idxToSwap];
+    sim_state.indexes[last_elem] = dead_index; //Save his original position of alive core swapped
+
+    //Put Alive core at dead position (NOT COALESCED)
+    sim_state.currR[dead_index] = tmp_currR;
+    sim_state.loads[dead_index] = tmp_loads;
+    sim_state.temps[dead_index] = tmp_temps;
+    sim_state.indexes[dead_index] = left_cores-1; //Save original position of dead core swapped
+}
+#endif
 
 
 #endif //SIMULATION_CONFIG

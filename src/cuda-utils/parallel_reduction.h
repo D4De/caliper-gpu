@@ -92,8 +92,8 @@ template<class T>
 __global__ void collect_res_gpu(T *input,float* result, int numOfBlocks) // compute the final reduction
 {
 
-    *result = input[0];
-    return;
+    //*result = input[0];
+    //return;
     unsigned int tid = threadIdx.x;// + blockDim.x*blockIdx.x;
     unsigned i;
     __shared__ T localVars[1024];   //Max num possible num of blocks
