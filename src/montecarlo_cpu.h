@@ -1,15 +1,15 @@
 #ifndef CALIPER_CPU
 #define CALIPER_CPU
-    #include "./thermal_model.h"
+    #include "./simulation-utils/thermal_model.h"
     #include "./utils/utils.h"
-    #include "./cuda-utils/simulation_config.h"
+    #include "./simulation-utils/simulation_config.h"
 #endif
 
 #define FIXED_NUM_TEST true
 #define USE_CONFIDENCE false
 
 
-void montecarlo_simulation_cpu(long* num_of_tests,int max_cores,int min_cores,int rows,int cols, double wl,double confInt,double stop_threshold,bool fixed_num_test,double * sumTTF,double * sumTTFx2){
+void montecarlo_simulation_cpu(configuration_description* config,double * sumTTF,double * sumTTFx2){
    
     //-------------------------------------------------
     //----Variables Declaration------------------------
@@ -24,6 +24,9 @@ void montecarlo_simulation_cpu(long* num_of_tests,int max_cores,int min_cores,in
     int left_cores;
     double ciSize,mean,var,Zinv,th;
 
+    int rows = config->rows;
+    int cols = config->cols;
+
     //-------------------------------------------------
     //----Allocate Memory------------------------------
     //-------------------------------------------------
@@ -36,14 +39,14 @@ void montecarlo_simulation_cpu(long* num_of_tests,int max_cores,int min_cores,in
     //--------------------------------------------------
     //----Confidence Intervall Setup--------------------
     //--------------------------------------------------
-    Zinv = invErf(0.5 + confInt / 100.0 / 2);
-    stop_threshold = stop_threshold / 100.0 / 2; // half of the threshold
+    Zinv = invErf(0.5 + config->confInt / 100.0 / 2);
+    config->threshold = config->threshold / 100.0 / 2; // half of the threshold
 
     //--------------------------------------------------
     //---Montecarlo Simulation--------------------------
     //--------------------------------------------------
     //TODO PUT again THE "level of confidence as possible stop condition"
-    for (i = 0;(fixed_num_test && (i < *num_of_tests)) || (!fixed_num_test && ((i < MIN_NUM_OF_TRIALS) || (ciSize / mean > stop_threshold))); i++) {
+    for (i = 0;(config->useNumOfTest && (i < config->num_of_tests)) || (!config->useNumOfTest && ((i < MIN_NUM_OF_TRIALS) || (ciSize / mean > config->threshold))); i++) {
         double random;
         double stepT;
         int minIndex;
@@ -51,12 +54,12 @@ void montecarlo_simulation_cpu(long* num_of_tests,int max_cores,int min_cores,in
         double t, eqT;
         int j;
     //-----------EXPERIMENT INITIALIZATION----------
-        left_cores = max_cores;
+        left_cores = config->max_cores;
         totalTime = 0;
         minIndex = 0;
 
         //Arrays Initialization:
-        for (j = 0; j < max_cores; j++) {
+        for (j = 0; j < config->max_cores; j++) {
             currR[j]  = 1;
             alives[j] = true;
             indexes[j] = j;
@@ -64,18 +67,18 @@ void montecarlo_simulation_cpu(long* num_of_tests,int max_cores,int min_cores,in
 
     //-----------RUN CURRENT EXPERIMENT----------
     //THIS CYCLE generate failure times for alive cores and find the shortest one  
-        while (left_cores >= min_cores) {
+        while (left_cores >= config->min_cores) {
             //Initialize Minimum index
             minIndex = -1;
         //-----------Redistribute Loads among alive cores----------
-            double distributedLoad = wl * max_cores / left_cores;
+            double distributedLoad = config->initial_work_load * config->max_cores / left_cores;
 
             for (j = 0; j < left_cores; j++) {
                 int index = indexes[j];
                 loads[index] = distributedLoad;
             }
             //Set Load of lastly dead core to 0
-            loads[left_cores-1] = 0;
+            loads[indexes[left_cores-1]] = 0;
 
         //-----------Compute Temperatures of each core based on loads----
             tempModel(loads, temps,indexes,left_cores, rows, cols,0);
@@ -115,7 +118,7 @@ void montecarlo_simulation_cpu(long* num_of_tests,int max_cores,int min_cores,in
             totalTime = totalTime + stepT; //Current simulation time
 
         //---------UPDATE Configuration----------------- 
-            if (left_cores > min_cores) {
+            if (left_cores > config->min_cores) {
                 alives[minIndex] = false;
                 swap_core_index(indexes,minIndex,left_cores,0);
                 // compute remaining reliability for working cores
@@ -141,7 +144,7 @@ void montecarlo_simulation_cpu(long* num_of_tests,int max_cores,int min_cores,in
     //printf("%f\n",ciSize);
     //https://www.omnicalculator.com/statistics/confidence-interval#:~:text=Compute%20the%20standard%20error%20as,to%20obtain%20the%20confidence%20interval.
     }
-    *num_of_tests = i;//Final num of test
+    config->num_of_tests = i;//Final num of test
     i=0;
 
     

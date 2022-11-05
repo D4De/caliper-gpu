@@ -5,9 +5,9 @@
 OUTPUT_FILE=./statistics/cpu_times_fixed_num_2.csv
 MIN_CORE=6
 WL=0
-EXEC=./caliper
-#EXEC=./gpu_exec
-#EXTRA_ARG=-g 1
+#EXEC=./caliper
+EXEC=./gpu_exec
+EXTRA_ARG=-g
 #EXTRA_ARG=-c\ 0.95\ 0.005
 #---ARG0: OUTPUT FILE---------------
 if [ -z "$1" ]

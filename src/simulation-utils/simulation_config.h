@@ -2,8 +2,27 @@
 #define SIMULATION_CONFIG
 //#define CUDA //To enambe cuda_helper functions
 #ifdef CUDA
-    #include "cuda_helper.h"
+    #include "../cuda-utils/cuda_helper.h"
 #endif
+
+#include "default_values.h"
+/**
+ * Allow to store the current state of a single core
+*/
+struct core_state{
+    float curr_r;
+    float temp;
+    float load;
+    float voltage; //We can add more Death types like Chinese paper
+    int real_index;
+};
+
+/**
+ * Contain all usefull information about the simulation State
+ * All the Working variables used by threads
+ * All the results (sumTTF...)
+ * All the parameters that evolve during time (left_cores, current_workload)
+*/
 struct simulation_state{
     float * currR;  
     float * temps;   //TODO merge temps and loads array 
@@ -21,15 +40,26 @@ struct simulation_state{
     float * sumTTFx2;
 };
 
+/**
+ * Contain all the static configuration values initialized by user using args or initialized by default
+*/
 struct configuration_description{
     int     rows;           //Rows of cores in the grid
     int     cols;           //Cols of cores in the grid
-    int     min_cores;        //Min num of cores alive
+    int     min_cores;      //Min num of cores alive
     int     max_cores;
-    int     num_of_tests;    //Num of iteration in montecarlo
+    int     num_of_tests;   //Num of iteration in montecarlo
+    //GPU
     int     gpu_version;    //GPU algorithm version selector (0-> redux, 1-> dynamic,2...)  
     int     block_dim;      //Blocks dimension chosen
+    bool    isGPU;
 
+    //Confidence intervall
+    bool    useNumOfTest;   //True use confidence, False use numOfTest
+    float   threshold;      //Threshold
+    float   confInt;        //Intervallo confidenza
+    
+    
     float   initial_work_load;  //Initial cores workload
 };
 
@@ -71,6 +101,8 @@ void setup_config(configuration_description* config,int num_of_tests,int max_cor
     config->gpu_version = gpu_version;
     config->initial_work_load = wl;
     config->max_cores = max_cores;
+    config->useNumOfTest = true;
+    config->isGPU  = false;
 }
 
 /**
@@ -87,7 +119,6 @@ void swap_core_index(int* cores,int dead_index,int size,int offset){
 
     cores[offset+size-1] = cores[dead_index]; //Swap dead index to end
     cores[dead_index] = tmp;         
-
 }
 
 

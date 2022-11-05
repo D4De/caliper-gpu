@@ -1,8 +1,6 @@
 #ifndef THERMAL_MODEL
 #define THERMAL_MODEL
 #include <iostream>
-#define ROWS 20
-#define COLS 20
 
 // Electro-Migration related parameters
 #define BETA 2

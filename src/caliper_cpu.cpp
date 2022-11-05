@@ -15,12 +15,12 @@ Neither the name of Politecnico di Milano nor the names of its contributors may 
 
 //CUSTOM HEADERS:
 
-#include "thermal_model.h"
+#include "simulation-utils/thermal_model.h"
+#include "simulation-utils/simulation_config.h"
+#include "utils/args_parsing.h"
 #include "utils/utils.h"
 #include "utils/benchmark_helper.h"
 #include "montecarlo_cpu.h"
-
-#define BLOCK_DIM 128
 
 int main(int argc, char* argv[]) {
     int left_cores, min_cores = 0, tmp_min_cores, max_cores;
@@ -40,40 +40,15 @@ int main(int argc, char* argv[]) {
 
     //TODO Inizialize Loads using params from user
 
-    //-------------------------------------------------
-    //----parsing input arguments----------------------
-    //-------------------------------------------------
-    rows            = atoi(argv[1]);
-    cols            = atoi(argv[2]);
-    min_cores       = atoi(argv[3]);
-    max_cores       = rows * cols;
-    wl              = atof(argv[4]);
-    
-    //Use confidence intervall
-    if(argc > 5 && argv[5][1] == 'c')
-    {
-        confInt = atof(argv[6]);
-        thr = atof(argv[7]);
-        numTest = false;
-    }
-
-    //Use GPU
-    if(argc > 5 &&  argv[5][1] == 'g'){
-        isGPU = true;
-    }
-
+    //SETUP BENCHMARK
     benchmark_results benchmark(rows,cols,min_cores,wl);
     benchmark_timer timer = benchmark_timer();
 
-    //check both stopping threshold and confidence interval are set if 1 is false
-    if (!numTest && (confInt == 0 || thr == 0)) {
-        if (!(confInt == 0 && thr == 0)) {
-            std::cerr << "Confidence Interval / Stopping threshold missing!" << std::endl;
-            exit(1);
-        } else {
-            numTest = true;
-        }
-    }
+    //SETUP CONFIG STRUCT (TODO)
+    //Set default values and then check for arguments setup
+    configuration_description config;
+    setup_config(&config,NUM_OF_TESTS,ROWS*COLS,MIN_CORES,INITIAL_WORKLOAD,ROWS,COLS,BLOCK_DIM,GPU_VERSION);
+    parse_args(&config,argc,argv);
 
     //-------------------------------------------------
     //-----set up environment--------------------------
@@ -104,7 +79,7 @@ int main(int argc, char* argv[]) {
     //------------------------------------------------------------------------------
     //when using the confidence interval, we want to execute at least MIN_NUM_OF_TRIALS
     timer.start();
-    montecarlo_simulation_cpu(&num_of_tests,max_cores,min_cores,rows,cols,wl,confInt,thr,numTest,&sumTTF,&sumTTFX2);
+    montecarlo_simulation_cpu(&config,&sumTTF,&sumTTFX2);
     timer.stop();
    
     
@@ -118,36 +93,11 @@ int main(int argc, char* argv[]) {
     //------------------------------------------------------------------------------
     //---------Display Results------------------------------------------------------
     //------------------------------------------------------------------------------
-    double curr_alives = num_of_tests;
-    double prec_time = 0;
-    double mttf_int = (sumTTF / num_of_tests);
-    double mttf_int1 = 0;
-    if (outputfilename) {
-        std::ofstream outfile(outputfilename);
-        if (results.count(0) == 0) {
-            results[0] = 0;
-        }
-        //TODO understand if it is important
-        for (std::map<double, double>::iterator mapIt = results.begin(); mapIt != results.end(); mapIt++) {
-            curr_alives = curr_alives - mapIt->second;
-            mttf_int1 = mttf_int1 + curr_alives / num_of_tests * (mapIt->first - prec_time);
-            prec_time = mapIt->first;
-            outfile << mapIt->first << " " << (curr_alives / num_of_tests) << std::endl;
-        }
-        outfile.close();
-    }
 
-    /*std::cout << "SumTTF: " <<sumTTF<< std::endl;
-    std::cout << "MTTF: " << mttf_int << " (years: " << (mttf_int / (24 * 365)) << ") " << mttf_int1 << std::endl;
-    std::cout << "Exec time: " << ((double) timer.getTime())<< std::endl;
-    std::cout << "Number of tests performed: " << num_of_tests << std::endl;
-    std::cout << "Mean: " << mean << std::endl;
-    std::cout << "Variance: " << var << std::endl;
-    std::cout << "Standard Deviation: " << sqrt(var) << std::endl;
-    std::cout << "Coefficient of variation: " << (sqrt(var) / mean) << std::endl;
-    std::cout << "Confidence interval: " << mean - ciSize << " " << mean + ciSize << std::endl;
-    */
-    std::cout<<rows<<","<<cols<<","<<rows*cols<<","<<min_cores<<","<<wl<<","<<num_of_tests<<","<<ciSize<<","<<((double) timer.getTime())<<","<<mttf_int<<","<<(mttf_int / (24 * 365))<<"\n";
+    saveOnFile(&config,results,outputfilename);
+    double mttf_int = (sumTTF / num_of_tests);
+
+    std::cout<<config.rows<<","<<config.cols<<","<<config.rows*config.cols<<","<<config.min_cores<<","<<config.initial_work_load<<","<<config.num_of_tests<<","<<ciSize<<","<<((double) timer.getTime())<<","<<mttf_int<<","<<(mttf_int / (24 * 365))<<"\n";
     benchmark.set_results(mttf_int,timer.getTime(),mean,var,ciSize);
     benchmark.save_results("benchmark.txt");
     return 0;

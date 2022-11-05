@@ -56,9 +56,6 @@ __device__ float accumulate(T *input, size_t dim,int num_of_elem)
 		warpReduce<T>(input, threadId);
 	__syncthreads();
 
-    if (threadId == 0){
-        //printf("Partial Result = %f\n",input[0]);
-    }
 	return input[0];
 }
 
@@ -88,7 +85,6 @@ __device__ float accumulate_min(T *input, size_t dim,int num_of_elem)
     }
 	return input[0];
 }
-
 //-----------------------------------------------------------------------
 //-------------GLOBAL COLLECTOR ALL VERSIONS-----------------------------
 //-----------------------------------------------------------------------
@@ -96,15 +92,17 @@ template<class T>
 __global__ void collect_res_gpu(T *input,float* result, int numOfBlocks) // compute the final reduction
 {
 
-    //*result = input[0];
-    //return;
-    unsigned int tid = threadIdx.x + blockDim.x*blockIdx.x;
+    *result = input[0];
+    return;
+    unsigned int tid = threadIdx.x;// + blockDim.x*blockIdx.x;
     unsigned i;
     __shared__ T localVars[1024];   //Max num possible num of blocks
     //Each thread Save in shared mem-> element in first and second half
-    localVars[tid]                  =   input[tid];
-    localVars[tid +  numOfBlocks/2] =   input[tid +  numOfBlocks/2];
-    __syncthreads();
+
+    if(tid < numOfBlocks/ 2){
+        localVars[tid] = input[tid] + input[tid+ numOfBlocks/2];
+        __syncthreads();
+    }
 
     if(tid <= numOfBlocks/2){
         //IF Remaining cells are more then 32
@@ -112,9 +110,7 @@ __global__ void collect_res_gpu(T *input,float* result, int numOfBlocks) // comp
         {
             if (tid < i)//Each cycle use half of the threads
             {
-                localVars[tid] += localVars[tid + i];
-                // eg: 1->10 || 1-5 || 1-2 || 
-                //eg2: 2->11 || 2-6 || 2-3 ||
+                localVars[tid] += localVars[tid + i]; //first half elem + second half elem
             }
             __syncthreads();
         }
@@ -124,7 +120,7 @@ __global__ void collect_res_gpu(T *input,float* result, int numOfBlocks) // comp
         __syncthreads();
 
         if(tid==0){
-            *result = localVars[tid];
+            *result = localVars[tid]; //Thread 0 has result
         }
             
         __syncthreads();

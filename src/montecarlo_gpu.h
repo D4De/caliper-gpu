@@ -4,12 +4,12 @@
     //CUDA-UTILS
     #include "cuda-utils/cuda_helper.h"
     #include "cuda-utils/parallel_reduction.h"
-    #include "cuda-utils/simulation_config.h"
+    #include "./simulation-utils/simulation_config.h"
     //UTILS
     #include "utils/benchmark_helper.h"
     #include "utils/utils.h"
     //THERMAL MODEL
-    #include "./thermal_model.h"
+    #include "./simulation-utils/thermal_model.h"
 
 
 
@@ -87,6 +87,7 @@ __device__ int montecarlo_random_walk_step(simulation_state sim_state,configurat
         __syncthreads();
 
         if(stepT[0] == stepT[threadIdx.x ])*minIndex = index; 
+        
         //TODO IF MULTIPLE BLOCKS -> NEED GLOBAL ACCUMULATION!!!
     }
 }
@@ -140,6 +141,7 @@ __global__ void montecarlo_simulation_step(simulation_state sim_state,configurat
     //Determine which core die in this iteration (by calculating TTF)
     montecarlo_random_walk_step(sim_state,config,stepT,&min_index,left_cores,offset); //Work only if leftcores<blockdim
     
+    __syncthreads();
     //sim_state.sumTTF[position] = stepT[0];  //TODO we need an offset of thread into sumTTF global mem
     if(threadIdx.x == 0 && position==0){
         printf("Val:%f\n",stepT[0]);
@@ -196,11 +198,11 @@ __global__ void montecarlo_simulation_cuda_dynamic(simulation_state sim_state,co
         //-----------Redistribute Loads among alive cores----------
             double distributedLoad = (double)config.initial_work_load * (double)config.max_cores / (double)left_cores;
             for (j = 0; j < left_cores; j++) {
-                int index = indexes[offset + j];
+                int index = indexes[offset + j];    //index of alive cores
                 loads[index] = distributedLoad;
             }
             //Set Load of lastly dead core to 0
-            loads[offset + left_cores-1] = 0;
+            loads[indexes[offset + left_cores-1]] = 0;//Potrebbe essere qui lerrore
 
         //---------Launch Child kernel to calculate a random walk step for this thread  
             //WHY I CANT RUN A 2D child KERNEL????
@@ -208,10 +210,8 @@ __global__ void montecarlo_simulation_cuda_dynamic(simulation_state sim_state,co
             int num_of_blocks = (left_cores + block_dim - 1) / block_dim;
 
           //Call simulation step dynamicly by decreasing grid size evry time a core die
-            __syncthreads();
             montecarlo_simulation_step<<<num_of_blocks,block_dim>>>(sim_state,config,distributedLoad,left_cores,offset,tid);
-            cudaDeviceSynchronize();
-            __syncthreads();          
+            cudaDeviceSynchronize();         
 
             //partial_sumTTF[threadIdx.x] = partial_sumTTF[threadIdx.x] + stepT;
             //TODO SAVE RESULT OF STEPT TO GLOBAL OR SHARED MEMORY 
@@ -238,7 +238,29 @@ __global__ void montecarlo_simulation_cuda_dynamic(simulation_state sim_state,co
     }
 }
 
-__global__ void montecarlo_simulation_cuda_redux(simulation_state sim_state,curandState_t *states, int num_of_tests,int block_dim,int max_cores,int min_cores,int rows,int cols, float wl,float * sumTTF_res,float * sumTTFx2_res){
+__device__ int getMatrixIndex(int col,int row,int id,int offset){
+    int i;
+    return offset;
+}
+
+/**
+ * Data structure is composed like
+ * [All data 0][All data 1][..][All data N] N is Num of thread/iteration
+ * 
+ * i represent the data position we want to access
+*/
+__device__ int getIndex(int i, int N){
+
+    int tid = threadIdx.x + blockDim.x*blockIdx.x; //Identify 
+
+    return tid + N*i; //id identify the 
+}
+
+__device__ void swapState(simulation_state sim_state,int dead_index,int left_cores){
+    
+}
+
+__global__ void montecarlo_simulation_cuda_redux_coalesced(simulation_state sim_state,curandState_t *states, int num_of_tests,int block_dim,int max_cores,int min_cores,int rows,int cols, float wl,float * sumTTF_res,float * sumTTFx2_res){
  
     unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
     int offset = tid * (rows * cols);
@@ -270,9 +292,10 @@ __global__ void montecarlo_simulation_cuda_redux(simulation_state sim_state,cura
 
         for (j = 0; j < max_cores; j++) { //Also parallelizable (dont know if usefull, only for big N)
             int index = offset + j;
-            currR[index]  = 1;
-            alives[index] = true;
-            indexes[index] = index;
+            currR[index]    = 1;
+            alives[index]   = true;
+            indexes[index]  = index;
+            loads[index]    = wl;
         }
 
         while (left_cores >= min_cores) {
@@ -290,12 +313,6 @@ __global__ void montecarlo_simulation_cuda_redux(simulation_state sim_state,cura
                 int index = indexes[offset + j];
                 loads[index] = distributedLoad;
             }
-            //Set Load of lastly dead core to 0
-            loads[offset + left_cores-1] = 0;
-
-            int block_dim = 256;
-            //TODO optimize tempModel by computing temp only of alive cores
-            //CHECK HOW DYNAMICALY ALLOCATE ARRAY INSIDE KERNEL (into registers and not global memory)
 
             //FUNZIONE OTTIMIZZATA DA FIXARE(??)
             tempModel(loads, temps,indexes,left_cores, rows, cols,offset); 
@@ -341,6 +358,8 @@ __global__ void montecarlo_simulation_cuda_redux(simulation_state sim_state,cura
                         currR[index] = exp(-pow((stepT + eqT) / alpha, BETA));
                 }
             }
+            //Set Load of lastly dead core to 0
+            loads[indexes[offset + left_cores-1]] = 0;//Potrebbe essere qui lerrore
             left_cores--; //Reduce number of alive core in this simulation
         }//END SIMULATION-----------------------------
         //Sync the threads
@@ -352,12 +371,136 @@ __global__ void montecarlo_simulation_cuda_redux(simulation_state sim_state,cura
         //Add the partial result of this block to the final result
         __syncthreads();
         if(threadIdx.x == 0){
-            float x;
-            //atomicAdd(sumTTF_res,partial_sumTTF[0]); 
+            atomicAdd(&(sumTTF_res[0]),partial_sumTTF[0]); 
             //USING ATOMIC ADD-> SAME RESULT AS CPU, WITH GLOBAL REDUCE.... NOT:.. CHECK WHY
             
             //Each Thread 0 assign to his block cell the result of its accumulate
-            sumTTF_res[blockIdx.x] = partial_sumTTF[0]; //Each block save its result in its "ID"
+            //sumTTF_res[blockIdx.x] = partial_sumTTF[0]; //Each block save its result in its "ID"
+        }
+        
+        //TODO ACCUMULATE ALSO SUMTTFx2
+
+    }
+}
+
+__global__ void montecarlo_simulation_cuda_redux(simulation_state sim_state,configuration_description config ,float * sumTTF_res,float * sumTTFx2_res){
+ 
+    curandState_t *states = sim_state.rand_states;
+
+    unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    int offset = tid * (config.rows * config.cols);
+    //extern __shared__ unsigned int tmp_sumTTF[];
+    //extern __shared__ unsigned int tmp_sumTTFx2[]; //??? dont know if necessary
+    extern __shared__ float partial_sumTTF[];
+    
+    sumTTF_res[blockIdx.x] = 0;
+    partial_sumTTF[threadIdx.x] = 0;
+
+    if(tid<config.num_of_tests){
+        double random;
+        int left_cores;
+        double stepT;
+        int minIndex;
+        double totalTime;
+        int j;
+        double t, eqT;
+
+        float* currR   = sim_state.currR;
+        float* loads   = sim_state.loads;
+        float* temps   = sim_state.temps;
+        bool*  alives  = sim_state.alives; //TODO allocate those array on global memory on host side
+        int*   indexes = sim_state.indexes;
+
+        left_cores = config.max_cores;
+        totalTime = 0;
+        minIndex = 0;
+
+        for (j = 0; j < config.max_cores; j++) { //Also parallelizable (dont know if usefull, only for big N)
+            int index = offset + j;
+            currR[index]    = 1;
+            alives[index]   = true;
+            indexes[index]  = index;
+            loads[index]    = config.initial_work_load;
+        }
+
+        while (left_cores >= config.min_cores) {
+             minIndex = -1;
+
+        
+        //-----------Redistribute Loads among alive cores----------
+            double distributedLoad = (double)config.initial_work_load * (double)config.max_cores / (double)left_cores;
+
+            //To improve both performance and divergence we remove the if(alive[j])
+            //by using the indexes of alive cores instead of if(alive[j])
+
+            //Set Load of alive cores
+            for (j = 0; j < left_cores; j++) {
+                int index = indexes[offset + j];
+                loads[index] = distributedLoad;
+            }
+
+            //FUNZIONE OTTIMIZZATA DA FIXARE(??)
+            tempModel(loads, temps,indexes,left_cores, config.rows, config.cols,offset); 
+            //Versione non ottimizzata
+            //tempModel(loads, temps,indexes,left_cores, rows, cols,offset); 
+
+            //-----------Random Walk Step computation-------------------------
+            for (j = 0; j < left_cores; j++) {
+                //Random  is in range [0 : currR[j]]
+                int index = indexes[offset + j]; //Current alive core
+                random =(double)curand_uniform(&states[tid])* currR[index]; //current core will potentially die when its R will be equal to random. drand48() generates a number in the interval [0.0;1.0)
+                double alpha = getAlpha(temps[index]);
+                t = alpha * pow(-log(random), (double) 1 / BETA); //elapsed time from 0 to obtain the new R value equal to random
+                eqT = alpha * pow(-log(currR[index]), (double) 1 / BETA); //elapsed time from 0 to obtain the previous R value
+                t = t - eqT;
+
+                //the difference between the two values represents the time elapsed from the previous failure to the current failure
+                //(we will sum to the total time the minimum of such values)
+                    
+                if (minIndex == -1 || (minIndex != -1 && t < stepT)) {
+                    minIndex = index;//Set new minimum index
+                    stepT = t;   //set new minimum time as timeStep
+                } //TODO ADD A CHECK ON MULTIPLE FAILURE IN THE SAME INSTANT OF TIME.
+            }
+        //-------Check if No failed core founded-----------
+            if (minIndex == -1) {
+                //TODO HOW THROW ERRORS IN CUDA?????
+                return;
+            }
+        //---------UPDATE TOTAL TIME----------------- 
+            //Current simulation time
+            partial_sumTTF[threadIdx.x] = partial_sumTTF[threadIdx.x] + stepT;
+            //totalTime = totalTime + stepT;
+        //---------UPDATE Configuration----------------- 
+            if (left_cores > config.min_cores) {
+                alives[minIndex] = false;
+                swap_core_index(sim_state.indexes,minIndex,left_cores,offset); //move index of dead core to end
+                // compute remaining reliability for working cores
+                for (j = 0; j < left_cores; j++) {
+                        int index = indexes[offset+j]; //Current alive core
+                    	double alpha = getAlpha(temps[index]);
+                        eqT = alpha * pow(-log(currR[index]), (double) 1 / BETA); //TODO: fixed a buf. we have to use the eqT of the current unit and not the one of the failed unit
+                        currR[index] = exp(-pow((stepT + eqT) / alpha, BETA));
+                }
+            }
+            //Set Load of lastly dead core to 0
+            loads[indexes[offset + left_cores-1]] = 0;//Potrebbe essere qui lerrore
+            left_cores--; //Reduce number of alive core in this simulation
+        }//END SIMULATION-----------------------------
+        //Sync the threads
+        __syncthreads();
+        
+        //Acccumulate the results of this block
+        accumulate<float>(partial_sumTTF,blockDim.x,config.num_of_tests);
+
+        //Add the partial result of this block to the final result
+        __syncthreads();
+        if(threadIdx.x == 0){
+            atomicAdd(&(sumTTF_res[0]),partial_sumTTF[0]); 
+            //USING ATOMIC ADD-> SAME RESULT AS CPU, WITH GLOBAL REDUCE.... NOT:.. CHECK WHY
+            
+            //Each Thread 0 assign to his block cell the result of its accumulate
+            //sumTTF_res[blockIdx.x] = partial_sumTTF[0]; //Each block save its result in its "ID"
         }
         
         //TODO ACCUMULATE ALSO SUMTTFx2
@@ -372,7 +515,7 @@ __global__ void montecarlo_simulation_cuda_redux(simulation_state sim_state,cura
  * -Launch Simulation
  * -Collect results from global mem
 */
-void montecarlo_simulation_cuda_launcher(int num_of_tests,int max_cores,int min_cores,int rows,int cols, float wl,double * sumTTF,double * sumTTFx2,int block_dim,int version)
+void montecarlo_simulation_cuda_launcher(configuration_description* config,double * sumTTF,double * sumTTFx2)
  {
     //TODO contain all the malloc/necessary code to call the kernel
            //----CUDA variables:------------
@@ -381,24 +524,22 @@ void montecarlo_simulation_cuda_launcher(int num_of_tests,int max_cores,int min_
         float *sumTTFx2_GPU; //GPU result sumTTFx2
         float res;
         simulation_state sim_state;
-        configuration_description config;
         curandState_t *states;
 
-        int num_of_blocks = (num_of_tests+block_dim-1)/block_dim;
+        int num_of_blocks = (config->num_of_tests+config->block_dim-1)/config->block_dim;
         //----MEMORY ALLOCATION:---------
         CHECK(cudaMalloc(&sumTTF_GPU    , num_of_blocks*sizeof(float)));   //Allocate Result memory
         CHECK(cudaMalloc(&sumTTFx2_GPU  , sizeof(float))); //Allocate Result memory
-        CHECK(cudaMalloc(&states        , num_of_tests*sizeof(curandState_t))); //Random States array
+        CHECK(cudaMalloc(&states        , config->num_of_tests*sizeof(curandState_t))); //Random States array
         CHECK(cudaMalloc(&sumTTF_GPU_final, sizeof(float)));   //Allocate Result memory
 
-        allocate_simulation_state_on_device(&sim_state,rows,cols,num_of_tests);
+        allocate_simulation_state_on_device(&sim_state,config->rows,config->cols,config->num_of_tests);
         sim_state.sumTTF   = sumTTF_GPU;
         sim_state.sumTTFx2 = sumTTFx2_GPU;
 
-        setup_config(&config,num_of_tests,rows*cols,min_cores,wl,rows,cols,block_dim,version);
         //----Declare Grid Dimensions:---------
         dim3 blocksPerGrid(num_of_blocks,1,1);
-        dim3 threadsPerBlock(block_dim,1,1);
+        dim3 threadsPerBlock(config->block_dim,1,1);
 
         //----KERNELS CALL -------------------
         //Inizialize Random states
@@ -408,19 +549,20 @@ void montecarlo_simulation_cuda_launcher(int num_of_tests,int max_cores,int min_
         //Associate random states with the sim_state
         sim_state.rand_states = states;
         //Execute Montecarlo simulation on GPU//,
-        if(version == 0){
-            montecarlo_simulation_cuda_redux<<<blocksPerGrid,threadsPerBlock,block_dim*sizeof(float)>>>(sim_state,states,num_of_tests,block_dim,max_cores,min_cores,rows,cols,wl,sumTTF_GPU,sumTTFx2_GPU);
+        if(config->gpu_version == 0){
+            montecarlo_simulation_cuda_redux<<<blocksPerGrid,threadsPerBlock,config->block_dim*sizeof(float)>>>(sim_state,*config,sumTTF_GPU,sumTTFx2_GPU);
             CHECK_KERNELCALL();
             cudaDeviceSynchronize();
-        }else if(version == 1){
+        }else if(config->gpu_version == 1){
             printf("DYNAMIC\n");
-            montecarlo_simulation_cuda_dynamic<<<blocksPerGrid,threadsPerBlock,block_dim*sizeof(float)>>>(sim_state,config);
+            montecarlo_simulation_cuda_dynamic<<<blocksPerGrid,threadsPerBlock,config->block_dim*sizeof(float)>>>(sim_state,*config);
             CHECK_KERNELCALL();
             cudaDeviceSynchronize();
         }
         
          //WARNING!!! DOSNT COUNT PADDING IN ACCUMULATE
         collect_res_gpu<float><<<1,num_of_blocks/2>>>(sumTTF_GPU,sumTTF_GPU_final,num_of_blocks);
+        //collect_res_gpu_x<<<1,threadsPerBlock>>>(sumTTF_GPU,sumTTF_GPU_final,blocksPerGrid.x);
         CHECK_KERNELCALL();
         cudaDeviceSynchronize();
         //----Copy back results on CPU-----------

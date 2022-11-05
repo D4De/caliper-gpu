@@ -19,14 +19,12 @@ Neither the name of Politecnico di Milano nor the names of its contributors may 
 #include "montecarlo_gpu.h"
 #include "utils/utils.h"
 #include "utils/benchmark_helper.h"
+#include "utils/args_parsing.h"
 
-
-#define BLOCK_DIM 256
 
 int main(int argc, char* argv[]) {
-    int left_cores, min_cores = 0, tmp_min_cores, max_cores;
-    long num_of_tests = NTESTS;
-    int block_dim = BLOCK_DIM;
+
+    
     std::map<double, double> results;
     int i;
 
@@ -37,69 +35,27 @@ int main(int argc, char* argv[]) {
     unsigned short randomSeed[3] = { 0, 0, 0 };
     double confInt = 0, thr = 0;
     
+    //Static Configs
     int cols,rows;
     double wl;
-
-    //TODO Inizialize Loads using params from user
-
-    //-------------------------------------------------
-    //----parsing input arguments----------------------
-    //-------------------------------------------------
-    rows            = atoi(argv[1]);
-    cols            = atoi(argv[2]);
-    min_cores       = atoi(argv[3]);
-    max_cores       = rows * cols;
-    wl              = atof(argv[4]);
+    long num_of_tests = NTESTS;
+    int min_cores = 0, tmp_min_cores, max_cores;
+    int left_cores;
     
-    int index_offset = 0;   //This allow to have multiple arguments simply in priority order
-    //Use confidence intervall
-
-    
-    if(argc > 5 && argv[5][1] == 'n')           //NUM OF ITERATION
-    {
-        num_of_tests = atoi(argv[6]);
-        numTest = true;
-        index_offset += 2;
-    }else if(argc > 5 && argv[5][1] == 'c')     //CONFIDENCE INTERVALL
-    {
-        confInt = atof(argv[6]);
-        thr = atof(argv[7]);
-        numTest = false;
-        index_offset += 3;
-    }
-
+    //GPU configs
     int gpu_version = 0;
-    //Use GPU                                   //USE GPU
-    if(argc > 5+index_offset &&  argv[5+index_offset][1] == 'g'){
-        isGPU = true;
-        
+    int block_dim = BLOCK_DIM;
 
-        if(argc > 6+index_offset ){
-            gpu_version = atoi(argv[6+index_offset]);
-            index_offset++;
-        }
 
-        if(argc > 6+index_offset ){
-            block_dim = atoi(argv[6+index_offset]);
-            index_offset++;
-        }
-        
-        index_offset++;
-        //TODO SETUP NUM OF BLOCKS
-    }
-
+    //SETUP BENCHMARK
     benchmark_results benchmark(rows,cols,min_cores,wl);
     benchmark_timer timer = benchmark_timer();
 
-    //check both stopping threshold and confidence interval are set if 1 is false
-    if (!numTest && (confInt == 0 || thr == 0)) {
-        if (!(confInt == 0 && thr == 0)) {
-            std::cerr << "Confidence Interval / Stopping threshold missing!" << std::endl;
-            exit(1);
-        } else {
-            numTest = true;
-        }
-    }
+    //SETUP CONFIG STRUCT (TODO)
+    //Set default values and then check for arguments setup
+    configuration_description config;
+    setup_config(&config,NUM_OF_TESTS,ROWS*COLS,MIN_CORES,INITIAL_WORKLOAD,ROWS,COLS,BLOCK_DIM,GPU_VERSION);
+    parse_args(&config,argc,argv);
 
     //-------------------------------------------------
     //-----set up environment--------------------------
@@ -129,56 +85,33 @@ int main(int argc, char* argv[]) {
     //----------Run Monte Carlo Simulation------------------------------------------
     //------------------------------------------------------------------------------
     //when using the confidence interval, we want to execute at least MIN_NUM_OF_TRIALS
-    if(!isGPU){
+    if(!config.isGPU){
         timer.start();
-        montecarlo_simulation_cpu(&num_of_tests,max_cores,min_cores,rows,cols,wl,confInt,thr,numTest,&sumTTF,&sumTTFX2);
+        montecarlo_simulation_cpu(&config,&sumTTF,&sumTTFX2);
         timer.stop();
     }else{
         //printDeviceInfo();
         timer.start();
-        montecarlo_simulation_cuda_launcher(num_of_tests,max_cores,min_cores,rows,cols,wl,&sumTTF,&sumTTFX2,block_dim,gpu_version);
+        montecarlo_simulation_cuda_launcher(&config,&sumTTF,&sumTTFX2);
         timer.stop();
     }
+    
 
     //----CALCULATE OTHER RESULTS-----------
     //std::cout<<"SumTTF : \t"<<sumTTF<<"\n";
-    mean = sumTTF / (double) (num_of_tests); //do consider that num_of_tests is equal to i at end cycle 
-    var = sumTTFX2 / (double) (num_of_tests-1) - mean * mean;
-    ciSize = Zinv * sqrt(var / (double) (num_of_tests));
+    mean = sumTTF / (double) (config.num_of_tests); //do consider that num_of_tests is equal to i at end cycle 
+    var = sumTTFX2 / (double) (config.num_of_tests-1) - mean * mean;
+    ciSize = Zinv * sqrt(var / (double) (config.num_of_tests));
     //printf("CiSize[%d]: %f\n",num_of_tests,ciSize);
+
     //------------------------------------------------------------------------------
     //---------Display Results------------------------------------------------------
     //------------------------------------------------------------------------------
-    double curr_alives = num_of_tests;
-    double prec_time = 0;
-    double mttf_int = (sumTTF / num_of_tests);
-    double mttf_int1 = 0;
-    if (outputfilename) {
-        std::ofstream outfile(outputfilename);
-        if (results.count(0) == 0) {
-            results[0] = 0;
-        }
-        //TODO understand if it is important
-        for (std::map<double, double>::iterator mapIt = results.begin(); mapIt != results.end(); mapIt++) {
-            curr_alives = curr_alives - mapIt->second;
-            mttf_int1 = mttf_int1 + curr_alives / num_of_tests * (mapIt->first - prec_time);
-            prec_time = mapIt->first;
-            outfile << mapIt->first << " " << (curr_alives / num_of_tests) << std::endl;
-        }
-        outfile.close();
-    }
 
-    /*std::cout << "SumTTF: " <<sumTTF<< std::endl;
-    std::cout << "MTTF: " << mttf_int << " (years: " << (mttf_int / (24 * 365)) << ") " << mttf_int1 << std::endl;
-    std::cout << "Exec time: " << ((double) timer.getTime())<< std::endl;
-    std::cout << "Number of tests performed: " << num_of_tests << std::endl;
-    std::cout << "Mean: " << mean << std::endl;
-    std::cout << "Variance: " << var << std::endl;
-    std::cout << "Standard Deviation: " << sqrt(var) << std::endl;
-    std::cout << "Coefficient of variation: " << (sqrt(var) / mean) << std::endl;
-    std::cout << "Confidence interval: " << mean - ciSize << " " << mean + ciSize << std::endl;
-    */
-    std::cout<<rows<<","<<cols<<","<<rows*cols<<","<<min_cores<<","<<wl<<","<<num_of_tests<<","<<ciSize<<","<<((double) timer.getTime())<<","<<mttf_int<<","<<(mttf_int / (24 * 365))<<"\n";
+    saveOnFile(&config,results,outputfilename);
+    double mttf_int = (sumTTF / num_of_tests);
+
+    std::cout<<config.rows<<","<<config.cols<<","<<config.rows*config.cols<<","<<config.min_cores<<","<<config.initial_work_load<<","<<config.num_of_tests<<","<<ciSize<<","<<((double) timer.getTime())<<","<<mttf_int<<","<<(mttf_int / (24 * 365))<<"\n";
     benchmark.set_results(mttf_int,timer.getTime(),mean,var,ciSize);
     benchmark.save_results("benchmark.txt");
     return 0;
