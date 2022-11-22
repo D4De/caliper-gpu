@@ -15,6 +15,7 @@ struct core_state{
     float load;     //Work load of this core
     float voltage;  //We can add more Death types like Chinese paper
     int real_index; //Real position in the grid
+    bool alive;
 };
 
 /**
@@ -31,6 +32,7 @@ struct simulation_state{
     bool  * alives;  //TODO remove alives array
 
     core_state * core_states;
+    float* times;   //times to death
 
     float   current_workload;
     int     left_cores;
@@ -69,6 +71,7 @@ struct configuration_description{
 /**
  * Allocate Global Memory of gpu to store the simulation state
 */
+
 void allocate_simulation_state_on_device(simulation_state* state,configuration_description config){
     int cells = config.rows*config.cols*config.num_of_tests;
 
@@ -84,6 +87,7 @@ void allocate_simulation_state_on_device(simulation_state* state,configuration_d
     CHECK(cudaMalloc(&state->loads    , cells*sizeof(float)));  //loads
     CHECK(cudaMalloc(&state->indexes  , cells*sizeof(int)));    //indexes
     CHECK(cudaMalloc(&state->alives   , cells*sizeof(bool)));   //alives
+    CHECK(cudaMalloc(&state->times    , cells*sizeof(float)));  //times
 }
 
 /**
@@ -103,6 +107,7 @@ void free_simulation_state(simulation_state* state,configuration_description con
     CHECK(cudaFree(state->loads));
     CHECK(cudaFree(state->indexes));
     CHECK(cudaFree(state->alives));
+    CHECK(cudaFree(state->times));
 }
 
 #endif //CUDA

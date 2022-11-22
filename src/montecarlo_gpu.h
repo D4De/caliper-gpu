@@ -41,6 +41,27 @@ __device__ void tempModel_gpu(float* loads, float* temps,int* indexes,int left_c
     return;
 }
 
+__device__ void tempModel_gpu_grid(simulation_state sim_state, configuration_description config, int core_id, int walk_id){
+
+    int r = core_id/config.cols;    //Row position into local grid
+    int c = core_id%config.cols;    //Col position into local grid
+
+    float temp = 0;
+    int k,h;
+
+    if(core_id<config.max_cores){
+        for (k = -1; k < 2; k++){
+            for (h = -1; h < 2; h++){
+                if ((k != 0 || h != 0) && k != h && k != -h && r + k >= 0 && r + k < config.rows && c + h >= 0 && c + h < config.cols){
+                    temp += sim_state.core_states[walk_id*config.max_cores+(r + k)*config.cols + (c + h)].load * NEIGH_TEMP;
+                }
+            }
+        }
+        sim_state.core_states[core_id+walk_id*config.max_cores].temp = ENV_TEMP + sim_state.core_states[core_id+walk_id*config.max_cores].load * SELF_TEMP + temp;
+    }
+    return;
+}
+
 /**
  * Calculate for each core the TTF (time till die) and extract the core that will die sooner
 */
@@ -495,7 +516,62 @@ __global__ void montecarlo_simulation_cuda_redux(simulation_state sim_state,conf
 
     }
 }
+/*
+__device__ float prob_to_death(simulation_state sim_state, configuration_description config, int walk_id, int core_id){
+    int global_id = walk_id*config.max_cores + core_id;
+    core_state s = sim_state.core_states[global_id];
+    int index = 0: //TODO
+    random =(double)curand_uniform(sim_state.rand_states[index])* s.curr_r; //current core will potentially die when its R will be equal to random. drand48() generates a number in the interval [0.0;1.0)
+    float alpha = getAlpha(s.temp);
+    float t = alpha * pow(-log(random), (float) 1 / BETA); //elapsed time from 0 to obtain the new R value equal to random
+    float eqT = alpha * pow(-log(s.curr_r), (float) 1 / BETA); //elapsed time from 0 to obtain the previous R value
+    sim_state.times[global_id]= t - eqT;
+    float min = accumulate_min(sim_state.times);    //TODO what parameters?
+    if(min == t-eqT) {
+        sim_state.core_states[global_id].alive = false;
+        sim_state.core_states[global_id].load = 0;
+    }
+    return min;
+}
 
+__device__ void update_state(simulation_state sim_state, configuration_description config, int walk_id, int core_id, float stepT){
+    int global_id = walk_id*config.max_cores + core_id;
+    core_state* s = &sim_state.core_states[global_id];
+    if(s->alive){
+        float alpha = getAlpha(s->temp);
+        float eqT = alpha * pow(-log(s->curr_r), (float) 1 / BETA); //TODO: fixed a buf. we have to use the eqT of the current unit and not the one of the failed unit
+        s->curr_r = exp(-pow((stepT + eqT) / alpha, BETA));
+    }
+
+}
+
+__global__ void montecarlo_simulation_cuda_grid(simulation_state sim_state, configuration_description config ,float * sumTTF_res,float * sumTTFx2_res) {
+    unsigned int core_id = threadIdx.y + blockIdx.y * blockDim.y;
+    unsigned int walk_id = threadIdx.x + blockIdx.x * blockDim.x;
+
+    int index = core_id + walk_id*config.max_cores;
+    sim_state.core_states[index].load = config.initial_work_load;
+    sim_state.core_states[index].curr_r = 1;
+    sim_state.core_states[index].alive = true;
+
+    int left_cores = config.max_cores;
+    extern __shared__ float partial_sumTTF[];
+
+    while(left_cores >= config.min_cores){
+        if(sim_state.core_states[index].alive) {
+            double distributedLoad = config.initial_work_load * config.max_cores / left_cores;
+            sim_state.core_states[index].load = distributedLoad;
+            tempModel_gpu_grid(sim_state, config, core_id, walk_id);
+            float min = prob_to_death(sim_state, config, walk_id, core_id);
+            update_state(sim_state, config, walk_id, core_id, min);
+            partial_sumTTF[min] += min; //TODO cuda all thread write same cell
+        }
+        left_cores--;
+    }
+
+    //TODO accumulate sumTTF
+}
+ */
 /**
  * -Preparation and launch of Simulation
  * -Allocate Global Memory
@@ -515,6 +591,7 @@ void montecarlo_simulation_cuda_launcher(configuration_description* config,doubl
         curandState_t *states;
 
         int num_of_blocks = (config->num_of_tests+config->block_dim-1)/config->block_dim;
+        int num_of_blocks2D = (config->max_cores+config->block_dim-1)/config->block_dim;
         //----MEMORY ALLOCATION:---------
         CHECK(cudaMalloc(&sumTTF_GPU    , num_of_blocks*sizeof(float)));   //Allocate Result memory
         CHECK(cudaMalloc(&sumTTFx2_GPU  , sizeof(float))); //Allocate Result memory
@@ -556,6 +633,13 @@ void montecarlo_simulation_cuda_launcher(configuration_description* config,doubl
         else if(config->gpu_version == VERSION_DYNAMIC){
             printf("DINAMIC\n");
             montecarlo_simulation_cuda_dynamic<<<blocksPerGrid,threadsPerBlock,config->block_dim*sizeof(float)>>>(sim_state,*config);
+            CHECK_KERNELCALL();
+            cudaDeviceSynchronize();
+        }else if(config->gpu_version == VERSION_2D_GRID){
+            printf("GRID\n");
+            dim3 blocksPerGrid(num_of_blocks,num_of_blocks2D,1);
+            dim3 threadsPerBlock(config->block_dim,config->block_dim,1);
+            montecarlo_simulation_cuda_grid<<<blocksPerGrid,threadsPerBlock,config->block_dim*sizeof(float)>>>(sim_state,*config, sumTTF_GPU,sumTTFx2_GPU);
             CHECK_KERNELCALL();
             cudaDeviceSynchronize();
         }
