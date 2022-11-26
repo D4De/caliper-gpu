@@ -13,6 +13,7 @@
 #include <getopt.h>
 #include <set>
 #include <unistd.h>
+#include <float.h>
 #include "../simulation-utils/simulation_config.h"
 
 #define EMPTY_SET "#"

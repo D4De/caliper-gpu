@@ -517,17 +517,41 @@ __global__ void montecarlo_simulation_cuda_redux(simulation_state sim_state,conf
     }
 }
 /*
+__device__ unsigned int accumulate_min(unsigned int *input, size_t dim, configuration_description config) //TODO look at what can be done with warp_reduce
+//assuming a x_index first organization of the warps, no better improvement can be done
+//IDEA can be to flip (x, y) dimensions with (cores, walks)
+{
+    size_t threadId = threadIdx.y;
+    size_t global_offset = (threadIdx.x + blockIdx.x * blockDim.x)*config.max_cores + blockIdx.y * blockDim.y;
+    if (dim > 32)
+    {
+        size_t offset = dim/2;
+        for (size_t i = dim / 2; i > 0; i >>= 1)
+        {
+            if(threadId < i)
+                input[threadId + global_offset] = min(input[threadId + global_offset], input[threadId + global_offset + offset]);
+            offset >>= 1;
+            __syncthreads();
+        }
+    }
+
+    return input[global_offset];
+}
+
 __device__ float prob_to_death(simulation_state sim_state, configuration_description config, int walk_id, int core_id){
     int global_id = walk_id*config.max_cores + core_id;
     core_state s = sim_state.core_states[global_id];
-    int index = 0: //TODO
+    int index = 0; //TODO
     random =(double)curand_uniform(sim_state.rand_states[index])* s.curr_r; //current core will potentially die when its R will be equal to random. drand48() generates a number in the interval [0.0;1.0)
     float alpha = getAlpha(s.temp);
     float t = alpha * pow(-log(random), (float) 1 / BETA); //elapsed time from 0 to obtain the new R value equal to random
     float eqT = alpha * pow(-log(s.curr_r), (float) 1 / BETA); //elapsed time from 0 to obtain the previous R value
     sim_state.times[global_id]= t - eqT;
-    float min = accumulate_min(sim_state.times);    //TODO what parameters?
-    if(min == t-eqT) {
+    if(!sim_state.core_states[global_id].alive)
+        sim_state.times[global_id] = FLT_MAX;
+    __syncthreads();
+    float min = accumulate_min(sim_state.times, blockDim.y, config);
+    if(min == t-eqT) {          //what about 2 or more cores have same t-eqT
         sim_state.core_states[global_id].alive = false;
         sim_state.core_states[global_id].load = 0;
     }
@@ -542,7 +566,6 @@ __device__ void update_state(simulation_state sim_state, configuration_descripti
         float eqT = alpha * pow(-log(s->curr_r), (float) 1 / BETA); //TODO: fixed a buf. we have to use the eqT of the current unit and not the one of the failed unit
         s->curr_r = exp(-pow((stepT + eqT) / alpha, BETA));
     }
-
 }
 
 __global__ void montecarlo_simulation_cuda_grid(simulation_state sim_state, configuration_description config ,float * sumTTF_res,float * sumTTFx2_res) {
@@ -558,20 +581,22 @@ __global__ void montecarlo_simulation_cuda_grid(simulation_state sim_state, conf
     extern __shared__ float partial_sumTTF[];
 
     while(left_cores >= config.min_cores){
+        float min;
         if(sim_state.core_states[index].alive) {
             double distributedLoad = config.initial_work_load * config.max_cores / left_cores;
             sim_state.core_states[index].load = distributedLoad;
             tempModel_gpu_grid(sim_state, config, core_id, walk_id);
-            float min = prob_to_death(sim_state, config, walk_id, core_id);
-            update_state(sim_state, config, walk_id, core_id, min);
-            partial_sumTTF[min] += min; //TODO cuda all thread write same cell
         }
+        min = prob_to_death(sim_state, config, walk_id, core_id);
+        update_state(sim_state, config, walk_id, core_id, min);
+        partial_sumTTF[walk_id] += min; //all thread write same cell -> no problem
         left_cores--;
     }
-
+    //synch first
     //TODO accumulate sumTTF
 }
- */
+*/
+
 /**
  * -Preparation and launch of Simulation
  * -Allocate Global Memory
