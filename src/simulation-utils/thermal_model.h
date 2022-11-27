@@ -103,7 +103,7 @@ void tempModel_version2(float *loads, float* temps,int* indexes,float distribute
     int max_cores = rows*cols;
     for(int i=0;i<left_alive;i++){
         int absolute_index = getIndex(i,num_of_tests);     //contain position of this core in the original grid
-        int relative_index = indexes[absolute_index];   //local position (usefull only on gpu global memory,for cpu is same as absolute)
+        int relative_index = indexes[absolute_index];      //local position (usefull only on gpu global memory,for cpu is same as absolute)
         
         if(tid == 0){
             printf("(%d-%d-%f)",relative_index,absolute_index,temps[absolute_index]);
