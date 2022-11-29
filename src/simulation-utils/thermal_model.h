@@ -97,7 +97,6 @@ void tempModel(float *loads, float* temps,int* indexes,int left_alive, int rows,
 
 #ifdef CUDA
 __device__  
-
 void tempModel_version2(float *loads, float* temps,int* indexes,float distributed_load,int left_alive, int rows, int cols,int num_of_tests) {
     int tid = threadIdx.x + blockDim.x*blockIdx.x;
     int max_cores = rows*cols;

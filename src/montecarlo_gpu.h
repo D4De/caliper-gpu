@@ -41,6 +41,40 @@ __device__ void tempModel_gpu(float* loads, float* temps,int* indexes,int left_c
     }
     return;
 }
+__device__ void tempModel_gpu_struct(simulation_state sim_state, configuration_description config,float distributed_load,int left_alive){
+    int tid = threadIdx.x + blockDim.x*blockIdx.x;
+    
+    int max_cores = config.max_cores;
+    
+    core_state* cores = sim_state.core_states;
+    for(int i=0;i<left_alive;i++){
+        int absolute_index = getIndex(i,config.num_of_tests);          //contain position of this core in the original grid
+        int relative_index = sim_state.indexes[absolute_index]; //local position (usefull only on gpu global memory,for cpu is same as absolute)
+        
+        int r = relative_index/config.cols;    //Row position into local grid
+        int c = relative_index%config.cols;    //Col position into local grid
+
+        float temp = 0;
+        int k,h;
+        CUDA_DEBUG_MSG("Core index = [%d,%d,%d]\n",23,getIndex(i,config.num_of_tests),33);
+        return;
+
+        for (k = -1; k < 2; k++)
+        {
+            for (h = -1; h < 2; h++)
+            {
+                if ((k != 0 || h != 0) && k != h && k != -h && r + k >= 0 && r + k < config.rows && c + h >= 0 && c + h < config.cols){
+                    int idx = getIndex((r + k)*config.cols + (c + h),config.num_of_tests);
+                    //int ld = (indexes[idx] < left_alive) ? distributed_load : 0;
+                    temp += cores[idx].load * NEIGH_TEMP;
+                }
+            }
+        }
+
+        cores[absolute_index].temp = ENV_TEMP + cores[absolute_index].load * SELF_TEMP + temp;
+    }
+   
+}
 
 __device__ void tempModel_gpu_grid(simulation_state sim_state, configuration_description config, int core_id, int walk_id){
 
@@ -264,7 +298,7 @@ __device__ int getMatrixIndex(int col,int row,int id,int offset){
 
 
 __global__ void montecarlo_simulation_cuda_redux_coalesced(simulation_state sim_state,configuration_description config ,float * sumTTF_res,float * sumTTFx2_res){
-
+    CUDA_DEBUG_MSG("Initialize");
     curandState_t *states = sim_state.rand_states;
     unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
     //extern __shared__ unsigned int tmp_sumTTF[];
@@ -298,7 +332,6 @@ __global__ void montecarlo_simulation_cuda_redux_coalesced(simulation_state sim_
             indexes[index]  = j;
             loads[index]    = config.initial_work_load;
         }
-
 
         while (left_cores >= config.min_cores) {
             minIndex = -1;
@@ -398,6 +431,7 @@ __global__ void montecarlo_simulation_cuda_redux_coalesced(simulation_state sim_
 
 
 __global__ void montecarlo_simulation_cuda_redux_struct(simulation_state sim_state,configuration_description config ,float * sumTTF_res,float * sumTTFx2_res){
+    CUDA_DEBUG_MSG("Initialize\n");
     curandState_t *states = sim_state.rand_states;
 
     unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -443,7 +477,7 @@ __global__ void montecarlo_simulation_cuda_redux_struct(simulation_state sim_sta
             */
 
         }
-
+        CUDA_DEBUG_MSG("Start Simulation\n");
         while (left_cores >= config.min_cores) {
             minIndex = -1;
 
@@ -451,7 +485,9 @@ __global__ void montecarlo_simulation_cuda_redux_struct(simulation_state sim_sta
             double distributedLoad = (double)config.initial_work_load * (double)config.max_cores / (double)left_cores;
 
             //TODO UPDATE THE TEMPERATURE
+            tempModel_gpu_struct(sim_state,config,distributedLoad,left_cores);
 
+            CUDA_DEBUG_MSG("Temp\n");
             //Set Load of alive cores
             for (j = 0; j < left_cores; j++) {
                 int index = getIndex(j,config.num_of_tests); //Current alive core

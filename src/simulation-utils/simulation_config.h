@@ -190,13 +190,11 @@ __device__
 void swapStateStruct(simulation_state sim_state,int dead_index,int left_cores,int max_cores){
     int* index = sim_state.indexes;
     int* value = sim_state.real_pos;
-    core_state* cores = sim_state.cores;
+    core_state* cores = sim_state.core_states;
 
     //Get some indexes
     int last_elem        = getIndex(left_cores-1,max_cores); // Last elem alive
     int death_i        = getIndex(dead_index,max_cores);   // current core to die
-
-
 
     int temp = value[last_elem];
     value[last_elem] = value[death_i];
