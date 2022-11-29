@@ -29,6 +29,7 @@ struct simulation_state{
     float * temps;   //TODO merge temps and loads array 
     float * loads;
     int   * indexes;
+    int   * real_pos;
     bool  * alives;  //TODO remove alives array
 
     core_state * core_states;
@@ -86,6 +87,7 @@ void allocate_simulation_state_on_device(simulation_state* state,configuration_d
     CHECK(cudaMalloc(&state->temps    , cells*sizeof(float)));  //temps
     CHECK(cudaMalloc(&state->loads    , cells*sizeof(float)));  //loads
     CHECK(cudaMalloc(&state->indexes  , cells*sizeof(int)));    //indexes
+    CHECK(cudaMalloc(&state->real_pos  , cells*sizeof(int)));    //real positions
     CHECK(cudaMalloc(&state->alives   , cells*sizeof(bool)));   //alives
     CHECK(cudaMalloc(&state->times    , cells*sizeof(float)));  //times
 }
@@ -184,8 +186,33 @@ void swapState(simulation_state sim_state,int dead_index,int left_cores,int max_
     sim_state.indexes[dead_index] = left_cores-1; //Save original position of dead core swapped
 }
 
-__device__ 
+__device__
 void swapStateStruct(simulation_state sim_state,int dead_index,int left_cores,int max_cores){
+    int* index = sim_state.indexes;
+    int* value = sim_state.real_pos;
+    core_state* cores = sim_state.cores;
+
+    //Get some indexes
+    int last_elem        = getIndex(left_cores-1,max_cores); // Last elem alive
+    int death_i        = getIndex(dead_index,max_cores);   // current core to die
+
+
+
+    int temp = value[last_elem];
+    value[last_elem] = value[death_i];
+    value[death_i] = temp;
+
+    core_state* t_core = cores[last_elem];
+    cores[last_elem] = cores[death_i];
+    cores[death_i] = t_core;
+
+    temp = index[value[last_elem]];
+    index[value[last_elem]] = index[value[death_i]];
+    index[value[death_i]] = temp;
+}
+
+__device__ 
+void swapStateStruct1(simulation_state sim_state,int dead_index,int left_cores,int max_cores){
     int* indexes = sim_state.indexes;
 
     //Get some indexes
