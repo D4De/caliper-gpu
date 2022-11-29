@@ -183,6 +183,26 @@ void swapState(simulation_state sim_state,int dead_index,int left_cores,int max_
     sim_state.temps[dead_index] = tmp_temps;
     sim_state.indexes[dead_index] = left_cores-1; //Save original position of dead core swapped
 }
+
+__device__ 
+void swapStateStruct(simulation_state sim_state,int dead_index,int left_cores,int max_cores){
+    int* indexes = sim_state.indexes;
+
+    //Get some indexes
+    int last_elem        = getIndex(left_cores-1,max_cores); // Last elem alive
+    int old_last_elem    = getIndex(left_cores,max_cores);   // elem died last cycle
+    int idxToSwap        = getIndex(dead_index,max_cores);   // current core to die
+
+    //Update the indexes
+    indexes[last_elem] = dead_index; //coalesced
+
+    //Uncoalesced + divergent  access (depend this index where already used)
+    if(indexes[dead_index] == -1){
+        indexes[idxToSwap] = left_cores-1;      //First time this index host a dead core  (uncoalesced)
+    }else{
+        indexes[last_elem+1] = left_cores-1;    //Second time this index host a dead core (coalesced)
+    }
+}
 #endif
 
 

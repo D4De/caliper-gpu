@@ -37,6 +37,13 @@ __global__ void init_random_state(unsigned int seed, curandState_t *states){
 }
 
 
+//Allow to remove from code all the print or enable them if desired for debug
+#ifndef DEBUG_CUDA_1D
+    #define CUDA_DEBUG_MSG(...){unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;if(tid == 0){printf(__VA_ARGS__);}}
+#else
+    #define CUDA_DEBUG_MSG(...)
+#endif //DEBUG_CUDA
+
 void printDeviceInfo(){
     std::printf("Query Available devices\n");
 
