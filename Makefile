@@ -15,7 +15,7 @@ CALIPER_OBJ=$(CALIPER_SRC:src/%.cpp=$(CPU_BUILD_PATH)/%.o)
 CALIPER_GPU_OBJ=$(CALIPER_GPU_SRC:src/%.cpp=$(GPU_BUILD_PATH)/%.o)
 #------EXECUTABLES------------------------
 CALIPER_CPU_EX=caliper
-CALIPER_GPU_EX=caliper_gpu
+CALIPER_GPU_EX=gpu_exec
 
 #PATH TO CUDA INSTALLATION FOLDER
 CUDA_PATH = /usr/local/cuda-11.6
@@ -89,4 +89,5 @@ $(CALIPER_OBJ) : $(CALIPER_SRC)
 
 clean:
 	rm -rf caliper $(CALIPER_EX)
+	rm -rf caliper $(CALIPER_GPU_EX)
 	rm -rf build/cpu/*.o $(CALIPER_EX) $(THERMAL_EX) 
