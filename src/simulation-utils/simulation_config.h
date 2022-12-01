@@ -222,12 +222,9 @@ void swapStateStruct(simulation_state sim_state,int dead_index,int left_cores,in
     cores[last_elem] = cores[death_i];
     cores[death_i] = t_core;
     
-    int lc = getIndex(value[last_elem],num_of_test);//value[last_elem];
-    int dc = getIndex(value[death_i],num_of_test);//value[death_i];
-
-    temp = index[lc];
-    index[lc] = index[dc];
-    index[dc] = temp;
+    temp = index[value[last_elem]];
+    index[value[last_elem]] = index[value[death_i]];
+    index[value[death_i]] = temp;
 
         
     //CUDA_DEBUG_MSG("Swap [%d.%d]\n",dead_index,left_cores);

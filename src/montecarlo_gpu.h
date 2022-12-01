@@ -47,6 +47,7 @@ __device__ void tempModel_gpu_struct(simulation_state sim_state, configuration_d
     int max_cores = config.max_cores;
     
     core_state* cores = sim_state.core_states;
+    core_state x;
     for(int i=0;i<left_alive;i++){
         int absolute_index = getIndex(i,config.num_of_tests);          //contain position of this core in the original grid
         int relative_index = sim_state.indexes[absolute_index]; //local position (usefull only on gpu global memory,for cpu is same as absolute)
@@ -64,12 +65,13 @@ __device__ void tempModel_gpu_struct(simulation_state sim_state, configuration_d
                 if ((k != 0 || h != 0) && k != h && k != -h && r + k >= 0 && r + k < config.rows && c + h >= 0 && c + h < config.cols){
                     int idx = getIndex((r + k)*config.cols + (c + h),config.num_of_tests);
                     //int ld = (indexes[idx] < left_alive) ? distributed_load : 0;
-                    temp += cores[idx].load * NEIGH_TEMP;
+                    x = cores[idx];
+                    temp += x.load * NEIGH_TEMP;
                 }
             }
         }
 
-        cores[absolute_index].temp = ENV_TEMP + cores[absolute_index].load * SELF_TEMP + temp;
+        cores[absolute_index].temp = ENV_TEMP + distributed_load * SELF_TEMP + temp;
     }
    
 }
@@ -462,12 +464,9 @@ __global__ void montecarlo_simulation_cuda_redux_struct(simulation_state sim_sta
             //CUDA_DEBUG_MSG("[%d]n\n",j);
             int index = getIndex(j,config.num_of_tests);
             indexes[index]  = j;
-            real_pos[index] = j;
+            real_pos[index] = index;
 
             //Coalesced access to struct
-            local_cores[threadIdx.x] = cores[index]; 
-
-            //CUDA_DEBUG_MSG("UCCn\n");
             //Local Changes on Register memory (no global mem access!!)
             local_cores[threadIdx.x].curr_r      = 1;
             local_cores[threadIdx.x].real_index  = j;
@@ -493,6 +492,7 @@ __global__ void montecarlo_simulation_cuda_redux_struct(simulation_state sim_sta
             for (j = 0; j < left_cores; j++) {
                 int index = getIndex(j,config.num_of_tests); //Current alive core
                 local_cores[threadIdx.x] = cores[index]; //Coalesced access to struct
+                __syncthreads();
                 random =(double)curand_uniform(&states[tid])* local_cores[threadIdx.x].curr_r; //current core will potentially die when its R will be equal to random. drand48() generates a number in the interval [0.0;1.0)
                 double alpha = getAlpha(local_cores[threadIdx.x].temp);
                 t = alpha * pow(-log(random), (double) 1 / BETA); //elapsed time from 0 to obtain the new R value equal to random
@@ -523,6 +523,7 @@ __global__ void montecarlo_simulation_cuda_redux_struct(simulation_state sim_sta
                     int index = getIndex(j,config.num_of_tests); //Current alive core
                     //Coalesced Read of core state struct
                     local_cores[threadIdx.x] = cores[index];
+                    __syncthreads();
                     //Local changes to the core state (in register memory!!)
                     double alpha = getAlpha(local_cores[threadIdx.x].temp);
                     eqT = alpha * pow(-log(local_cores[threadIdx.x].curr_r), (double) 1 / BETA); //TODO: fixed a buf. we have to use the eqT of the current unit and not the one of the failed unit
@@ -531,7 +532,7 @@ __global__ void montecarlo_simulation_cuda_redux_struct(simulation_state sim_sta
                     cores[index] = local_cores[threadIdx.x];
                 }
             }
-
+            
             //Set Load of lastly dead core to 0
             int index = getIndex(left_cores-1,config.num_of_tests); //Current alive core
             cores[index].load = 0;
