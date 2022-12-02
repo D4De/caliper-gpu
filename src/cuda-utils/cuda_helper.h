@@ -35,6 +35,13 @@ __global__ void init_random_state(unsigned int seed, curandState_t *states){
     unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
     curand_init(seed, tid, 0, &states[tid]);
 }
+__global__ void init_random_state2D(unsigned int seed, curandState_t *states, int max_cores, int num_of_tests){
+    int walk_id = threadIdx.x + blockIdx.x * blockDim.x;
+    int core_id = threadIdx.y + blockIdx.y * blockDim.y;
+    int global_id = walk_id*max_cores + core_id;
+    if(core_id < max_cores && walk_id < num_of_tests)
+        curand_init(seed, global_id, 0, &states[global_id]);
+}
 
 //Allow to remove from code all the print or enable them if desired for debug
 #ifndef DEBUG_CUDA_1D

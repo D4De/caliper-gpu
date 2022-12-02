@@ -692,25 +692,21 @@ __device__ int accumulate_min(float *input, size_t dim, configuration_descriptio
     if(block_height < 1.0)
         dim = config.max_cores%(blockDim.y*(blockIdx.y+1));
 
-
     minis[threadId+global_offset] = threadId + global_offset;
     __syncthreads();
-    //for(int i = 0; i<config.max_cores; i++)
-    //if(global_offset+threadId == 0)
-    //printf("%f\n", input[i]);
-    size_t offset = dim/2;
-    for (size_t i = ceil(dim / 2); i > 0; i >>= 1)
+
+    bool odd = dim%2;
+    for (size_t i = dim/2; i>0; i >>= 1)
     {
-        //if(global_offset+threadId == 0)
-        //    printf("AAAA %d\n", minis[global_offset]);
-
         if(threadId < i)
-            if(input[minis[threadId+global_offset]] > input[minis[threadId + global_offset + offset]])
-                minis[threadId+global_offset] = minis[threadId + global_offset + offset];
-
-        offset >>= 1;
+            if(input[minis[threadId+global_offset]] > input[minis[threadId + global_offset + i]])
+                minis[threadId+global_offset] = minis[threadId + global_offset + i];
         __syncthreads();
-
+        if(odd && threadId == 0)
+            if(input[minis[threadId+global_offset]] > input[minis[threadId + global_offset + i*2]])
+                minis[threadId+global_offset] = minis[threadId + global_offset + i*2];
+        odd = i%2;
+        __syncthreads();
     }
     return minis[global_offset];
 }
@@ -747,8 +743,6 @@ __device__ void update_state(simulation_state sim_state, configuration_descripti
         double alpha = getAlpha(s->temp);
         double eqT = alpha * pow(-log(s->curr_r), (double) 1 / BETA); //TODO: fixed a buf. we have to use the eqT of the current unit and not the one of the failed unit
         s->curr_r = exp(-pow(((double)stepT + eqT) / alpha, BETA));
-        //if(walk_id == 0)
-        //    printf("curr_r of %d  =  %lf\n", core_id, s->curr_r);
     }
 }
 
@@ -771,45 +765,31 @@ __global__ void montecarlo_simulation_cuda_grid(simulation_state sim_state, conf
         while(left_cores >= config.min_cores){
             int min;
             if(sim_state.core_states[index].alive) {
-
                 float distributedLoad = config.initial_work_load * (float)(config.max_cores / (float)left_cores);
                 sim_state.core_states[index].load = distributedLoad;
                 tempModel_gpu_grid(sim_state, config, core_id, walk_id);
-                //CUDA_DEBUG_MSG("Load di %d = %f\n",core_id, sim_state.core_states[index].load);
-                //CUDA_DEBUG_MSG("R di %d = %f\n", core_id, sim_state.core_states[index].curr_r);
-
             }
             __syncthreads();
 
             min = prob_to_death(sim_state, config, walk_id, core_id, minis);
-            __syncthreads();
             update_state(sim_state, config, walk_id, core_id, sim_state.times[min]);
             __syncthreads();
-            for(int i = 0; i<config.max_cores; i++){
-                //if(index == 1)
-                //printf("%f\n", sim_state.core_states[i].load);
-            }
             if(core_id == 0)
                 partial_sumTTF[threadIdx.x] += sim_state.times[min];
             left_cores--;
         }
 
         __syncthreads();
-        if(core_id == 0)
-            accumulate<float>(partial_sumTTF,blockDim.x,config.num_of_tests);
+        if(core_id == 0){
+            if(((float)(blockIdx.x*blockDim.x+blockDim.x)/(float)config.num_of_tests) > 1.0 )
+                accumulate2D(partial_sumTTF,config.num_of_tests%blockDim.x);
+            else
+                accumulate2D(partial_sumTTF,blockDim.x);
+        }
         __syncthreads();
         if(threadIdx.x == 0 && core_id == 0)
             sumTTF_res[blockIdx.x] = partial_sumTTF[0];
-        /*
-        //TODO global_accumulate parallelized properly
-        if(core_id == 0 && threadIdx.x == 0)
-            for (size_t i = 0; i<blockDim.x; i++) {
-                sumTTF_res[blockIdx.x] += partial_sumTTF[i];
-                sumTTFx2_res[blockIdx.x] += partial_sumTTF[i]*partial_sumTTF[i];
-            }
-        */
-        //synch first
-        //TODO accumulate sumTTF
+
     }
 }
 
@@ -907,13 +887,12 @@ void montecarlo_simulation_cuda_launcher(configuration_description* config,doubl
     *sumTTFx2 = (double) res;
     */
     float temp[num_of_blocks];
-    *sumTTF = 0;
     CHECK(cudaMemcpy(temp, sumTTF_GPU, (num_of_blocks)*sizeof(float), cudaMemcpyDeviceToHost));
     for(int i = 0; i< num_of_blocks; i++){
         *sumTTF += temp[i];
     }
 
-    *sumTTFx2 = (*sumTTF)*(*sumTTF);
+    *sumTTFx2 = (*sumTTF)*(*sumTTF);    //TODO sumTTF squared
 
     //----FREE CUDA MEMORY------------------
     CHECK(cudaFree(sumTTF_GPU));
