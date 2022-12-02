@@ -728,8 +728,6 @@ __device__ int prob_to_death(simulation_state sim_state, configuration_descripti
     int id_min = accumulate_min(sim_state.times, blockDim.y, config, minis);
     __syncthreads();
     if(id_min == global_id) {
-        //if(walk_id == 0)
-        //    printf("I'm dead   %d\n", id_min);
         sim_state.core_states[global_id].alive = false;
         sim_state.core_states[global_id].load = 0.0;
     }
@@ -814,11 +812,12 @@ void montecarlo_simulation_cuda_launcher(configuration_description* config,doubl
 
     int num_of_blocks = (config->num_of_tests+config->block_dim-1)/config->block_dim;
     int num_of_blocks2D = (config->max_cores+config->block_dim-1)/config->block_dim;
+
     //----MEMORY ALLOCATION:---------
     CHECK(cudaMalloc(&sumTTF_GPU    , num_of_blocks*sizeof(float)));   //Allocate Result memory
     CHECK(cudaMalloc(&sumTTFx2_GPU  , sizeof(float))); //Allocate Result memory
     if(config->gpu_version == VERSION_2D_GRID){
-        CHECK(cudaMalloc(&states        , config->max_cores*config->num_of_tests*sizeof(curandState_t))); //Random States array
+        CHECK(cudaMalloc(&states        , config->num_of_tests*config->max_cores*sizeof(curandState_t))); //Random States array
     }
     else{
         CHECK(cudaMalloc(&states        , config->num_of_tests*sizeof(curandState_t))); //Random States array
@@ -829,16 +828,19 @@ void montecarlo_simulation_cuda_launcher(configuration_description* config,doubl
     sim_state.sumTTF   = sumTTF_GPU;
     sim_state.sumTTFx2 = sumTTFx2_GPU;
 
-    //----Declare Grid Dimensions:---------
     dim3 blocksPerGrid(num_of_blocks,1,1);
     dim3 threadsPerBlock(config->block_dim,1,1);
-
-    //----KERNELS CALL -------------------
-    //Inizialize Random states
-    init_random_state<<<blocksPerGrid,threadsPerBlock>>>(time(NULL),states);
-    cudaDeviceSynchronize();
-    CHECK_KERNELCALL();
-    //Associate random states with the sim_state
+    if(config->gpu_version != VERSION_2D_GRID){
+        init_random_state<<<blocksPerGrid,threadsPerBlock>>>(time(NULL),states);
+        cudaDeviceSynchronize();
+        CHECK_KERNELCALL();
+    }else{
+        blocksPerGrid.y = num_of_blocks2D;
+        threadsPerBlock.y = config->block_dim;
+        init_random_state2D<<<blocksPerGrid,threadsPerBlock>>>(time(NULL),states, config->max_cores, config->num_of_tests);
+        cudaDeviceSynchronize();
+        CHECK_KERNELCALL();
+    }
     sim_state.rand_states = states;
     //Execute Montecarlo simulation on GPU//,
     //TODO USE C++ TEMPLATE TO AVOID WRITING SAME CODE MULTIPLE TIME (eg at runtime modify the function to change mode)
