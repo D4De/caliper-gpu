@@ -689,18 +689,29 @@ __global__ void montecarlo_simulation_cuda_redux(simulation_state sim_state,conf
 __device__ float accumulate_min(float *input, size_t dim, configuration_description config) 
 {
     size_t threadId = threadIdx.y;
-    size_t global_offset = (threadIdx.x + blockIdx.x * blockDim.x)*config.max_cores + blockIdx.y * blockDim.y;
-    if (dim > 32)
+    int a = threadIdx.x == 0 ? 0 : threadIdx.x;
+    size_t global_offset = (blockIdx.x*blockDim.x + a)*config.max_cores + blockIdx.y*blockDim.y;
+    //check for padding
+    float block_height = config.max_cores/(blockDim.y*(blockIdx.y+1));
+    if(block_height < 1.0)
+        dim = config.max_cores%(blockDim.y*(blockIdx.y+1));
+    minis[threadId] = threadId + global_offset;
+    __syncthreads();
+    bool odd = dim%2;
+    for (size_t i = dim/2; i>0; i >>= 1)
     {
-        size_t offset = dim/2;
-        for (size_t i = dim / 2; i > 0; i >>= 1)
-        {
-            if(threadId < i)
-                input[threadId + global_offset] = min(input[threadId + global_offset], input[threadId + global_offset + offset]);
-            offset >>= 1;
-            __syncthreads();
-        }
+        if(threadId < i)
+            if(input[minis[threadId]] > input[minis[threadId + i]])
+                minis[threadId] = minis[threadId + i];
+        __syncthreads();
+        if(odd && threadId == 0)
+            if(input[minis[threadId]] > input[minis[threadId + i*2]])
+                minis[threadId] = minis[threadId + i*2];
+        odd = i%2;
+        __syncthreads();
     }
+    return minis[0];
+}
 
     return input[global_offset];
 }
@@ -718,8 +729,11 @@ __device__ float prob_to_death(simulation_state sim_state, configuration_descrip
     if(!sim_state.core_states[global_id].alive)
         sim_state.times[global_id] = FLT_MAX;
     __syncthreads();
-    float min = accumulate_min(sim_state.times, blockDim.y, config);
-    if(min == t-eqT) {          //what about 2 or more cores have same t-eqT
+    
+    int id_min = accumulate_min(sim_state.times, blockDim.y, config, minis);
+    
+    __syncthreads();
+    if(id_min == global_id) {
         sim_state.core_states[global_id].alive = false;
         sim_state.core_states[global_id].load = 0;
     }
@@ -730,44 +744,58 @@ __device__ void update_state(simulation_state sim_state, configuration_descripti
     int global_id = walk_id*config.max_cores + core_id;
     core_state* s = &sim_state.core_states[global_id];
     if(s->alive){
-        float alpha = getAlpha(s->temp);
-        float eqT = alpha * pow(-log(s->curr_r), (float) 1 / BETA); //TODO: fixed a buf. we have to use the eqT of the current unit and not the one of the failed unit
-        s->curr_r = exp(-pow((stepT + eqT) / alpha, BETA));
+        double alpha = getAlpha(s->temp);
+        double eqT = alpha * pow(-log(s->curr_r), (double) 1 / BETA); //TODO: fixed a buf. we have to use the eqT of the current unit and not the one of the failed unit
+        s->curr_r = exp(-pow(((double)stepT + eqT) / alpha, BETA));
     }
 }
 
 __global__ void montecarlo_simulation_cuda_grid(simulation_state sim_state, configuration_description config ,float * sumTTF_res,float * sumTTFx2_res) {
+
     unsigned int core_id = threadIdx.y + blockIdx.y * blockDim.y;
     unsigned int walk_id = threadIdx.x + blockIdx.x * blockDim.x;
 
-    int index = core_id + walk_id*config.max_cores;
-    sim_state.core_states[index].load = config.initial_work_load;
-    sim_state.core_states[index].curr_r = 1;
-    sim_state.core_states[index].alive = true;
-
-    int left_cores = config.max_cores;
-    extern __shared__ float partial_sumTTF[];
-
-    while(left_cores >= config.min_cores){
-        float min;
-        if(sim_state.core_states[index].alive) {
-            double distributedLoad = config.initial_work_load * config.max_cores / left_cores;
-            sim_state.core_states[index].load = distributedLoad;
-            tempModel_gpu_grid(sim_state, config, core_id, walk_id);
-        }
-        min = prob_to_death(sim_state, config, walk_id, core_id);
-        update_state(sim_state, config, walk_id, core_id, min);
+    if(core_id < config.max_cores && walk_id < config.num_of_tests){    //Padding control
+        int index = core_id + walk_id*config.max_cores;
+        sim_state.core_states[index].load = config.initial_work_load;
+        sim_state.core_states[index].curr_r = 1;
+        sim_state.core_states[index].alive = true;
+        int left_cores = config.max_cores;
+        extern __shared__ float mem_shared[];
+        float* partial_sumTTF = (float *)mem_shared;
+        int* minis = (int *)((float*)mem_shared + config.block_dim + config.block_dim*threadIdx.x);  //this is different for each walk in the block
         if(core_id == 0)
-            partial_sumTTF[threadIdx.x] += min;
-        left_cores--;
-    }
-    //TODO global_accumulate parallelized properly
-    if(core_id == 0 && threadIdx.x == 0)
-        for (size_t i = 0; i<blockDim.x; i++)
-            sumTTF_res[blockIdx.x] += partial_sumTTF[i];
+            partial_sumTTF[threadIdx.x] = 0;
 
-    //synch first
-    //TODO accumulate sumTTF
+        while(left_cores >= config.min_cores){
+            int min;
+            if(sim_state.core_states[index].alive) {
+                float distributedLoad = config.initial_work_load * (float)(config.max_cores / (float)left_cores);
+                sim_state.core_states[index].load = distributedLoad;
+                tempModel_gpu_grid(sim_state, config, core_id, walk_id);
+            }
+            __syncthreads();
+
+            min = prob_to_death(sim_state, config, walk_id, core_id, minis);
+            update_state(sim_state, config, walk_id, core_id, sim_state.times[min]);
+            __syncthreads();
+            if(core_id == 0)
+                partial_sumTTF[threadIdx.x] += sim_state.times[min];
+            left_cores--;
+        }
+
+        __syncthreads();
+        if(core_id == 0){
+            if(((float)(blockIdx.x*blockDim.x+blockDim.x)/(float)config.num_of_tests) > 1.0 )
+                accumulate2D(partial_sumTTF,config.num_of_tests%blockDim.x);
+            else
+                accumulate2D(partial_sumTTF,blockDim.x);
+        }
+        __syncthreads();
+        if(threadIdx.x == 0 && core_id == 0)
+            sumTTF_res[blockIdx.x] = partial_sumTTF[0];
+
+    }
 }
 
 
@@ -788,29 +816,46 @@ void montecarlo_simulation_cuda_launcher(configuration_description* config,doubl
     float res;
     simulation_state sim_state;
     curandState_t *states;
-    //printDeviceInfo();
+    /*
+    int nDevices;
+    cudaGetDeviceCount(&nDevices);
+    for (int i = 0; i < nDevices; i++) {
+        cudaDeviceProp prop;
+        cudaGetDeviceProperties(&prop, i);
+        printf("MAX shared memory per block: %f", (float)prop.sharedMemPerBlock);
+    }
+    */
     int num_of_blocks = (config->num_of_tests+config->block_dim-1)/config->block_dim;
     int num_of_blocks2D = (config->max_cores+config->block_dim-1)/config->block_dim;
+
     //----MEMORY ALLOCATION:---------
     CHECK(cudaMalloc(&sumTTF_GPU    , num_of_blocks*sizeof(float)));   //Allocate Result memory
     CHECK(cudaMalloc(&sumTTFx2_GPU  , sizeof(float))); //Allocate Result memory
-    CHECK(cudaMalloc(&states        , config->num_of_tests*sizeof(curandState_t))); //Random States array
+    if(config->gpu_version == VERSION_2D_GRID){
+        CHECK(cudaMalloc(&states        , config->num_of_tests*config->max_cores*sizeof(curandState_t))); //Random States array
+    }
+    else{
+        CHECK(cudaMalloc(&states        , config->num_of_tests*sizeof(curandState_t))); //Random States array
+    }
     CHECK(cudaMalloc(&sumTTF_GPU_final, sizeof(float)));   //Allocate Result memory
 
     allocate_simulation_state_on_device(&sim_state,*config);
     sim_state.sumTTF   = sumTTF_GPU;
     sim_state.sumTTFx2 = sumTTFx2_GPU;
 
-    //----Declare Grid Dimensions:---------
     dim3 blocksPerGrid(num_of_blocks,1,1);
     dim3 threadsPerBlock(config->block_dim,1,1);
-
-    //----KERNELS CALL -------------------
-    //Inizialize Random states
-    init_random_state<<<blocksPerGrid,threadsPerBlock>>>(time(NULL),states);
-    cudaDeviceSynchronize();
-    CHECK_KERNELCALL();
-    //Associate random states with the sim_state
+    if(config->gpu_version != VERSION_2D_GRID){
+        init_random_state<<<blocksPerGrid,threadsPerBlock>>>(time(NULL),states);
+        cudaDeviceSynchronize();
+        CHECK_KERNELCALL();
+    }else{
+        blocksPerGrid.y = num_of_blocks2D;
+        threadsPerBlock.y = config->block_dim;
+        init_random_state2D<<<blocksPerGrid,threadsPerBlock>>>(time(NULL),states, config->max_cores, config->num_of_tests);
+        cudaDeviceSynchronize();
+        CHECK_KERNELCALL();
+    }
     sim_state.rand_states = states;
     //Execute Montecarlo simulation on GPU//,
     //TODO USE C++ TEMPLATE TO AVOID WRITING SAME CODE MULTIPLE TIME (eg at runtime modify the function to change mode)
@@ -839,7 +884,7 @@ void montecarlo_simulation_cuda_launcher(configuration_description* config,doubl
         printf("GRID\n");
         dim3 blocksPerGrid(num_of_blocks,num_of_blocks2D,1);
         dim3 threadsPerBlock(config->block_dim,config->block_dim,1);
-        montecarlo_simulation_cuda_grid<<<blocksPerGrid,threadsPerBlock,config->block_dim*sizeof(float)>>>(sim_state,*config, sumTTF_GPU,sumTTFx2_GPU);
+        montecarlo_simulation_cuda_grid<<<blocksPerGrid,threadsPerBlock,(config->block_dim*(config->block_dim+1))*sizeof(float)>>>(sim_state,*config, sumTTF_GPU,sumTTFx2_GPU);
         CHECK_KERNELCALL();
         cudaDeviceSynchronize();
     }
@@ -855,7 +900,15 @@ void montecarlo_simulation_cuda_launcher(configuration_description* config,doubl
     *sumTTF = (double) res;
     CHECK(cudaMemcpy(&res, sumTTFx2_GPU, sizeof(float), cudaMemcpyDeviceToHost));
     *sumTTFx2 = (double) res;
-    
+    */
+    float temp[num_of_blocks];
+    CHECK(cudaMemcpy(temp, sumTTF_GPU, (num_of_blocks)*sizeof(float), cudaMemcpyDeviceToHost));
+    for(int i = 0; i< num_of_blocks; i++){
+        *sumTTF += temp[i];
+    }
+
+    *sumTTFx2 = (*sumTTF)*(*sumTTF);    //TODO sumTTF squared
+
     //----FREE CUDA MEMORY------------------
     //CHECK(cudaFree(sumTTF_GPU));
     CHECK(cudaFree(states));

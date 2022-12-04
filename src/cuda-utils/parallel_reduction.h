@@ -34,6 +34,26 @@ __device__ void warpReduce_min(volatile T *input,size_t threadId)
 //-----------------------------------------------------------------------
 //-------------ACCUMULATE FUNCTION VERSIONS------------------------------
 //-----------------------------------------------------------------------
+__device__ float accumulate2D(float *input, size_t dim)
+{
+    size_t threadId = threadIdx.x;
+    bool odd = dim%2;
+    for (int i = dim / 2; i > 0; i >>= 1)
+    {
+
+        if ((threadId  < i))
+        {
+            input[threadId] += input[threadId + i];
+        }
+
+        if(threadId == 0 && odd)
+            input[threadId] += input[threadId + 2*i];
+        odd = i%2;
+        __syncthreads();
+    }
+
+    return input[0];
+}
 
 template<class T>
 __device__ float accumulate(T *input, size_t dim,int num_of_elem)
