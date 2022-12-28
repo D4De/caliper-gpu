@@ -105,6 +105,55 @@ __device__ float accumulate_min(T *input, size_t dim,int num_of_elem)
     }
 	return input[0];
 }
+
+
+template<class T>
+__device__ T argmin(T* array,int index_a,int index_b){
+    int index = array[index_a]<array[index_b] ? index_a : index_b;
+
+    array[index_a] = array[index];//MOVE MIN INTO index_a position
+    return index;
+
+}
+
+template<class T>
+__device__ void warpReduce_argMin(volatile T *input,int* minis,size_t threadId)
+{
+    minis[threadId] = argmin(input,threadId,threadId + 32);
+    minis[threadId] = argmin(input,threadId,threadId + 16);
+    minis[threadId] = argmin(input,threadId,threadId + 8);
+    minis[threadId] = argmin(input,threadId,threadId + 4);
+    minis[threadId] = argmin(input,threadId,threadId + 2);
+    minis[threadId] = argmin(input,threadId,threadId + 1);
+}
+
+template<class T>
+__device__ T accumulate_argMin(simulation_state sim_state, configuration_description config, int walk_id, int core_id, int* minis)
+{
+    unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
+	size_t threadId = threadIdx.x;
+	if (config.max_cores > 32)
+	{
+		for (size_t i = config.max_cores / 2; i > 32; i >>= 1)
+		{
+
+            if ((threadId  < i )&& (tid + i < config.max_cores))// -> those elements are initialized to 0 so not relevant
+            {
+                minis[threadId] = argmin<T>(sim_state.times,threadId,threadId + i);
+            }
+            __syncthreads();
+        }
+	}
+	if (threadId < 32)
+		warpReduce_argMin<T>(sim_state.times,minis, threadId);
+	__syncthreads();
+
+    if (threadId == 0){
+        //printf("Partial Result = %f\n",input[0]);
+    }
+	return minis[0];
+}
+
 //-----------------------------------------------------------------------
 //-------------GLOBAL COLLECTOR ALL VERSIONS-----------------------------
 //-----------------------------------------------------------------------
