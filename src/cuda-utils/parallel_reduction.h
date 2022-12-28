@@ -12,12 +12,15 @@
 template<class T>
 __device__ void warpReduce(volatile T *input,size_t threadId)
 {
-	input[threadId] += input[threadId + 32];
-	input[threadId] += input[threadId + 16];
-	input[threadId] += input[threadId + 8];
-	input[threadId] += input[threadId + 4];
-	input[threadId] += input[threadId + 2];
-	input[threadId] += input[threadId + 1];
+    //printf("Pointer %p\n",input);
+    //CUDA_DEBUG_MSG("Warp Reduce: %d to %d\n",(int)threadId,(int)threadId+32);
+    //printf("Warp Reduce: %d to %d\n",(int)threadId,(int)threadId+32);
+    if(threadId+32<blockIdx.x) input[threadId] += input[threadId + 32];
+	if(threadId+16<blockIdx.x) input[threadId] += input[threadId + 16];
+    if(threadId+8<blockIdx.x) input[threadId] += input[threadId + 8];
+    if(threadId+4<blockIdx.x) input[threadId] += input[threadId + 4];
+    if(threadId+2<blockIdx.x) input[threadId] += input[threadId + 2];
+    if(threadId+1<blockIdx.x) input[threadId] += input[threadId + 1];
 }
 
 template<class T>
@@ -60,9 +63,16 @@ __device__ float accumulate(T *input, size_t dim,int num_of_elem)
 {
     unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
 	size_t threadId = threadIdx.x;
-	if (dim > 32)
-	{
-		for (size_t i = dim / 2; i > 32; i >>= 1)
+
+    CUDA_DEBUG_MSG("BLOCK DIM :%d\n",(int)blockDim.x);  
+
+	if (blockDim.x > 32)
+	{ 
+        if(threadId < blockDim.x / 2){
+            input[threadId] = input[threadId] + input[threadId+blockDim.x/2];
+        }
+         __syncthreads();
+		for (size_t i = blockDim.x / 4; i > 32; i >>= 1)
 		{
 
             if ((threadId  < i))//&& (tid + i < num_of_elem) -> those elements are initialized to 0 so not relevant
@@ -105,6 +115,55 @@ __device__ float accumulate_min(T *input, size_t dim,int num_of_elem)
     }
 	return input[0];
 }
+
+template<class T>
+__device__ T argmin(T* array,int index_a,int index_b){
+    int index = array[index_a]<array[index_b] ? index_a : index_b;
+
+    array[index_a] = array[index];//MOVE MIN INTO index_a position
+    return index;
+
+}
+
+template<class T>
+__device__ void warpReduce_argMin(volatile T *input,int* minis,size_t threadId)
+{
+    minis[threadId] = argmin(input,threadId,threadId + 32);
+    minis[threadId] = argmin(input,threadId,threadId + 16);
+    minis[threadId] = argmin(input,threadId,threadId + 8);
+    minis[threadId] = argmin(input,threadId,threadId + 4);
+    minis[threadId] = argmin(input,threadId,threadId + 2);
+    minis[threadId] = argmin(input,threadId,threadId + 1);
+}
+
+template<class T>
+__device__ T accumulate_argMin(simulation_state sim_state, configuration_description config, int walk_id, int core_id, int* minis)
+{
+    unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
+	size_t threadId = threadIdx.x;
+	if (config.max_cores > 32)
+	{
+		for (size_t i = config.max_cores / 2; i > 32; i >>= 1)
+		{
+
+            if ((threadId  < i )&& (tid + i < config.max_cores))// -> those elements are initialized to 0 so not relevant
+            {
+                minis[threadId] = argmin<T>(sim_state.times,threadId,threadId + i);
+            }
+            __syncthreads();
+        }
+	}
+	if (threadId < 32)
+		warpReduce_argMin<T>(sim_state.times,minis, threadId);
+	__syncthreads();
+
+    if (threadId == 0){
+        //printf("Partial Result = %f\n",input[0]);
+    }
+	return minis[0];
+}
+
+
 //-----------------------------------------------------------------------
 //-------------GLOBAL COLLECTOR ALL VERSIONS-----------------------------
 //-----------------------------------------------------------------------

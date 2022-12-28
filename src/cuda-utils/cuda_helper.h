@@ -28,12 +28,15 @@
 }\
 
 
+
 #ifndef CUDA_UTILS_FUNCTIONS
 #define CUDA_UTILS_FUNCTIONS
 
-__global__ void init_random_state(unsigned int seed, curandState_t *states){
+__global__ void init_random_state(unsigned int seed,int max_dim, curandState_t *states){
     unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    curand_init(seed, tid, 0, &states[tid]);
+    if(tid<max_dim){
+        curand_init(seed, tid, 0, &states[tid]);
+    }
 }
 __global__ void init_random_state2D(unsigned int seed, curandState_t *states, int max_cores, int num_of_tests){
     int walk_id = threadIdx.x + blockIdx.x * blockDim.x;
@@ -43,9 +46,23 @@ __global__ void init_random_state2D(unsigned int seed, curandState_t *states, in
         curand_init(seed, global_id, 0, &states[global_id]);
 }
 
+__global__ void init_random_state2D_Optimized(unsigned int seed, curandState_t *states, int max_cores, int num_of_tests){
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    int global_id = 0;
+
+    if(tid < num_of_tests){
+        for(int core_id=0;core_id<max_cores;core_id++){
+            global_id = tid*max_cores + core_id;
+            curand_init(seed, global_id, 0, &states[global_id]);
+        }
+    }   
+        
+}
+
 //Allow to remove from code all the print or enable them if desired for debug
 #ifndef DEBUG_CUDA_1D
     #define CUDA_DEBUG_MSG(...){unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;if(tid == 0){printf(__VA_ARGS__);}}
+    #define CUDA_DEBUG_MSG_TH(block,...){unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;if(tid == block*blockDim.x +threadIdx.x  ){printf(__VA_ARGS__);}}
     #define CUDA_PRINT_ARRAY(array,size,getIndexF){CUDA_DEBUG_MSG("[");for(int i=0;i<size;i++){CUDA_DEBUG_MSG("%d,",array[getIndexF(i,NUM_OF_TESTS)]);}CUDA_DEBUG_MSG("]\n");}
 #else
     #define CUDA_DEBUG_MSG(...)
@@ -77,6 +94,13 @@ void printDeviceInfo(){
            devProp.sharedMemPerBlock);
     printf("Maximum Shared Memory per multiprocessor: %zu bytes\n",
            devProp.sharedMemPerMultiprocessor);
+    printf("Maximum num of Blocks per multiprocessor: %d\n",
+           devProp.maxBlocksPerMultiProcessor);
+    printf("Maximum num of Threads per multiprocessor: %d\n",
+           devProp.maxThreadsPerMultiProcessor);
+    printf("Num OF Multiprocessor: %d\n",
+           devProp.multiProcessorCount);
+
     /*... output data visualization ...*/
 }
 #endif //CUDA_UTILS_FUNCTIONS

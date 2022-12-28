@@ -2,7 +2,7 @@
 #define SIMULATION_CONFIG
 //#define CUDA //To enambe cuda_helper functions
 #ifdef CUDA
-    #include "../cuda-utils/cuda_helper.h"
+#include "../cuda-utils/cuda_helper.h"
 #endif
 
 #include "default_values.h"
@@ -13,7 +13,7 @@ struct core_state{
     float curr_r;   //Current Probability to die
     float temp;     //Temperature of the core
     float load;     //Work load of this core
-    float voltage;  //We can add more Death types like Chinese paper
+    //float voltage;  //We can add more Death types like Chinese paper
     int real_index; //Real position in the grid
     bool alive;
 };
@@ -25,7 +25,7 @@ struct core_state{
  * All the parameters that evolve during time (left_cores, current_workload)
 */
 struct simulation_state{
-    float * currR;  
+    float * currR;
     float * temps;   //TODO merge temps and loads array 
     float * loads;
     int   * indexes;
@@ -37,9 +37,9 @@ struct simulation_state{
 
     float   current_workload;
     int     left_cores;
-    #ifdef CUDA
-        curandState_t * rand_states;
-    #endif
+#ifdef CUDA
+    curandState_t * rand_states;
+#endif
 
     float * sumTTF;
     float * sumTTFx2;
@@ -63,8 +63,8 @@ struct configuration_description{
     bool    useNumOfTest;   //True use confidence, False use numOfTest
     float   threshold;      //Threshold
     float   confInt;        //Intervallo confidenza
-    
-    
+
+
     float   initial_work_load;  //Initial cores workload
 };
 
@@ -77,24 +77,18 @@ void allocate_simulation_state_on_device(simulation_state* state,configuration_d
     int cells = config.rows*config.cols*config.num_of_tests;
 
     //STRUCT VERSION
-    if(config.gpu_version == VERSION_STRUCT_SHARED){
+    if(config.gpu_version == VERSION_STRUCT_SHARED || config.gpu_version == VERSION_2D_GRID || config.gpu_version == VERSION_GRID_LINEARIZED){
         CHECK(cudaMalloc(&state->core_states    , cells*sizeof(core_state)));
-        CHECK(cudaMalloc(&state->real_pos  , cells*sizeof(int)));    //real positions
-        //return;
     }
 
-    //ALL OTHER VERSIONS
-    if(config.gpu_version != VERSION_STRUCT_SHARED){
-        //ALL OTHER VERSION
-        CHECK(cudaMalloc(&state->currR    , cells*sizeof(float)));  //CurrR
-        CHECK(cudaMalloc(&state->temps    , cells*sizeof(float)));  //temps
-        CHECK(cudaMalloc(&state->loads    , cells*sizeof(float)));  //loads       
-        CHECK(cudaMalloc(&state->alives   , cells*sizeof(bool)));   //alives
-        CHECK(cudaMalloc(&state->times    , cells*sizeof(float)));  //times
-    }
-
+    //ALL OTHER VERSION
+    CHECK(cudaMalloc(&state->currR    , cells*sizeof(float)));  //CurrR
+    CHECK(cudaMalloc(&state->temps    , cells*sizeof(float)));  //temps
+    CHECK(cudaMalloc(&state->loads    , cells*sizeof(float)));  //loads
     CHECK(cudaMalloc(&state->indexes  , cells*sizeof(int)));    //indexes
-    
+    CHECK(cudaMalloc(&state->real_pos  , cells*sizeof(int)));    //real positions
+    CHECK(cudaMalloc(&state->alives   , cells*sizeof(bool)));   //alives
+    CHECK(cudaMalloc(&state->times    , cells*sizeof(float)));  //times
 }
 
 /**
@@ -103,34 +97,24 @@ void allocate_simulation_state_on_device(simulation_state* state,configuration_d
 void free_simulation_state(simulation_state* state,configuration_description config){
 
     //STRUCT VERSION
-    if(config.gpu_version == VERSION_STRUCT_SHARED){
-
+    if(config.gpu_version == VERSION_STRUCT_SHARED || config.gpu_version == VERSION_2D_GRID || config.gpu_version == VERSION_GRID_LINEARIZED){
         CHECK(cudaFree(state->core_states));
-        CHECK(cudaFree(state->real_pos));
-        //return;
+        return;
     }
 
     //ALL OTHER VERSIONS
-    if(config.gpu_version != VERSION_STRUCT_SHARED){
-         
-        CHECK(cudaFree(state->currR));
-        CHECK(cudaFree(state->temps));
-        CHECK(cudaFree(state->loads));
-        CHECK(cudaFree(state->alives));
-        CHECK(cudaFree(state->times));
-        //return;
-    }
-
-   
+    CHECK(cudaFree(state->currR));
+    CHECK(cudaFree(state->temps));
+    CHECK(cudaFree(state->loads));
     CHECK(cudaFree(state->indexes));
-    
-    
+    CHECK(cudaFree(state->alives));
+    CHECK(cudaFree(state->times));
 }
 
 #endif //CUDA
 
 void setup_config(configuration_description* config,int num_of_tests,int max_cores,int min_cores,int wl,int rows,int cols,int block_dim,int gpu_version){
-    
+
     config->num_of_tests = num_of_tests;
 
     config->cols        = cols;
@@ -147,36 +131,37 @@ void setup_config(configuration_description* config,int num_of_tests,int max_cor
 /**
  * Data structure is composed like
  * [All data 0][All data 1][..][All data N] N is Num of thread/iteration
- * 
+ *
  * i represent the data position we want to access
 */
 #ifdef CUDA
 __device__  int getIndex(int i, int N){
 
-    int tid = threadIdx.x + blockDim.x*blockIdx.x; //Identify 
-    int index = tid + N*i;
-    //CUDA_DEBUG_MSG("Get Index [%d,%d]%\n",tid,index);
-    return index; //Get the position of this thread inside the array for "CORE i in the grid"
+    int tid = threadIdx.x + blockDim.x*blockIdx.x; //Identify
+
+    return tid + N*i; //Get the position of this thread inside the array for "CORE i in the grid"
 }
+
+#define GETINDEX(i,tid,N)  (tid + N*(i))
 #endif
 /**
  * Swap the dead core to the end of the array
- * 
+ *
  * This allow to have alives core indexes saved on the first portion of the array
  * [Array of index] = [Alive cores][Dead Cores]
 */
 #ifdef CUDA
-__device__ __host__ 
+__device__ __host__
 #endif
 void swap_core_index(int* cores,int dead_index,int size,int offset){
     int tmp = cores[offset+size-1];
 
     cores[offset+size-1] = cores[dead_index]; //Swap dead index to end
-    cores[dead_index] = tmp;         
+    cores[dead_index] = tmp;
 }
 
 #ifdef CUDA
-__device__ 
+__device__
 
 void swapState(simulation_state sim_state,int dead_index,int left_cores,int max_cores){
 
@@ -203,17 +188,20 @@ void swapState(simulation_state sim_state,int dead_index,int left_cores,int max_
 }
 
 __device__
-void swapStateStruct(simulation_state sim_state,int dead_index,int left_cores,int num_of_test){
+void swapStateStruct(simulation_state sim_state,int dead_index,int left_cores,int num_of_tests){
+    unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
+
     int* index = sim_state.indexes;
     int* value = sim_state.real_pos;
     core_state* cores = sim_state.core_states;
 
     //Get some indexes
-    int last_elem      = getIndex(left_cores-1,num_of_test); // Last elem alive
-    int death_i        = getIndex(dead_index,num_of_test);   // current core to die
-
-    //CUDA_DEBUG_MSG("Swap [%d,%d]%\n",last_elem,death_i);
+    //int last_elem        = getIndex(left_cores-1,num_of_tests); // Last elem alive
+    //int death_i          = getIndex(dead_index,num_of_tests);   // current core to die
     
+    int last_elem   = GETINDEX((left_cores-1),tid,num_of_tests);
+    int death_i     = GETINDEX(dead_index,tid,num_of_tests);
+
     int temp = value[last_elem];
     value[last_elem] = value[death_i];
     value[death_i] = temp;
@@ -226,13 +214,27 @@ void swapStateStruct(simulation_state sim_state,int dead_index,int left_cores,in
     index[value[last_elem]] = index[value[death_i]];
     index[value[death_i]] = temp;
 
-        
-    //CUDA_DEBUG_MSG("Swap [%d.%d]\n",dead_index,left_cores);
-    //CUDA_PRINT_ARRAY(value,16,getIndex);
-    //CUDA_PRINT_ARRAY(index,16,getIndex);
-    
+     //CUDA_DEBUG_MSG("Swappato core: %d con core %d -> check %d\n",left_cores-1, dead_index,cores[death_i].real_index)
 }
 
+
+__device__
+void swapStateStructOptimized(simulation_state sim_state,int dead_index,int left_cores,int num_of_tests){
+    unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
+
+    int* index = sim_state.indexes;
+    int* value = sim_state.real_pos;
+    core_state* cores = sim_state.core_states;
+
+    //Get some indexes
+    //int last_elem        = getIndex(left_cores-1,num_of_tests); // Last elem alive
+    //int death_i          = getIndex(dead_index,num_of_tests);   // current core to die
+    
+    int last_elem   = GETINDEX((left_cores-1),tid,num_of_tests);
+    int death_i     = GETINDEX(dead_index,tid,num_of_tests);
+
+    cores[death_i] = cores[last_elem];
+}
 __device__ 
 void swapStateStruct1(simulation_state sim_state,int dead_index,int left_cores,int max_cores){
     int* indexes = sim_state.indexes;

@@ -12,3 +12,4 @@
 #define VERSION_STRUCT_SHARED   2
 #define VERSION_DYNAMIC         3
 #define VERSION_2D_GRID         4
+#define VERSION_GRID_LINEARIZED 5
