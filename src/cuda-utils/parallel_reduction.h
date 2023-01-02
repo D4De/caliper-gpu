@@ -60,9 +60,9 @@ __device__ float accumulate(T *input, size_t dim,int num_of_elem)
 {
     unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
 	size_t threadId = threadIdx.x;
-	if (dim > 32)
-	{
-		for (size_t i = dim / 2; i > 32; i >>= 1)
+	//if (dim > 32)
+	//{
+		for (size_t i = dim / 2; i > 0; i >>= 1)
 		{
 
             if ((threadId  < i))//&& (tid + i < num_of_elem) -> those elements are initialized to 0 so not relevant
@@ -71,13 +71,18 @@ __device__ float accumulate(T *input, size_t dim,int num_of_elem)
             }
             __syncthreads();
         }
-	}
+	//}
+    /*
+    WHY WARP REDUCE DOES NOT CHECK IF WE HAVE LESS THEN threadId + 32 elements?
 	if (threadId < 32)
 		warpReduce<T>(input, threadId);
 	__syncthreads();
+    */
 
 	return input[0];
 }
+
+
 
 template<class T>
 __device__ float accumulate_min(T *input, size_t dim,int num_of_elem)

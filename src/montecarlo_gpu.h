@@ -591,13 +591,13 @@ __global__ void montecarlo_simulation_cuda_redux_struct(simulation_state sim_sta
 
         //Acccumulate the results of this block
         accumulate<float>(partial_sumTTF,blockDim.x,config.num_of_tests);
-
+        //atomicAdd(&(partial_sumTTF[0]),partial_sumTTF[threadIdx.x]);
         //Add the partial result of this block to the final result
         __syncthreads();
         if(threadIdx.x == 0){
             //atomicAdd(&(sumTTF_res[0]),partial_sumTTF[0]);
             //USING ATOMIC ADD-> SAME RESULT AS CPU, WITH GLOBAL REDUCE.... NOT:.. CHECK WHY
-
+            printf("SUMTTF [ %d ] : %f\n",tid,partial_sumTTF[0]);
             //Each Thread 0 assign to his block cell the result of its accumulate
             sumTTF_res[blockIdx.x] = partial_sumTTF[0]; //Each block save its result in its "ID"
         }
@@ -746,8 +746,8 @@ __global__ void montecarlo_simulation_cuda_redux_struct_optimized(simulation_sta
         __syncthreads();
         CUDA_DEBUG_MSG("SUMTTF: %f\n", partial_sumTTF[0]);
         //Acccumulate the results of this block
-        accumulate<float>(partial_sumTTF,blockDim.x,config.num_of_tests);
-
+        //accumulate<float>(partial_sumTTF,blockDim.x,config.num_of_tests);
+         atomicAdd(&(partial_sumTTF[0]),partial_sumTTF[threadIdx.x]);
         //Add the partial result of this block to the final result
         __syncthreads();
         if(threadIdx.x == 0){
@@ -864,13 +864,13 @@ __global__ void montecarlo_simulation_cuda_redux(simulation_state sim_state,conf
 
         //Acccumulate the results of this block
         accumulate<float>(partial_sumTTF,blockDim.x,config.num_of_tests);
-
+        //atomicAdd(&(partial_sumTTF[0]),partial_sumTTF[threadIdx.x]);
         //Add the partial result of this block to the final result
         __syncthreads();
         if(threadIdx.x == 0){
             //atomicAdd(&(sumTTF_res[0]),partial_sumTTF[0]);
             //USING ATOMIC ADD-> SAME RESULT AS CPU, WITH GLOBAL REDUCE.... NOT:.. CHECK WHY
-
+            //printf("SUMTTF [ %d ] : %f\n",tid,partial_sumTTF[0]);
             //Each Thread 0 assign to his block cell the result of its accumulate
             sumTTF_res[blockIdx.x] = partial_sumTTF[0]; //Each block save its result in its "ID"
         }
@@ -880,10 +880,11 @@ __global__ void montecarlo_simulation_cuda_redux(simulation_state sim_state,conf
     }
 }
 
-__device__ int accumulate_min(float *input, size_t dim, configuration_description config, int* minis) //TODO look at what can be done with warp_reduce
+ //TODO look at what can be done with warp_reduce
 //assuming a x_index first organization of the warps, no better improvement can be done
 //IDEA can be to flip (x, y) dimensions with (cores, walks)
 //input should be shared (not global)
+__device__ int accumulate_min(float *input, size_t dim, configuration_description config, int* minis)
 {
     size_t threadId = threadIdx.y;
     size_t global_offset = (blockIdx.x*blockDim.x + threadIdx.x)*config.max_cores + blockIdx.y*blockDim.y;
@@ -1167,32 +1168,48 @@ __global__ void montecarlo_simulation_cuda_grid_linearized(simulation_state sim_
 
 
 
-__global__ void collect_res_gpu_grid(float* partial_sumTTF, float* result, int num_of_blocks){
-    extern __shared__ float input[];   //work on this instead of partil_sumTTF, which lies in global memory 
+__global__ void collect_res_gpu_grid(float* input, float* result, int num_of_blocks){
+    extern __shared__ float partial_reduction[];   //work on this instead of partil_sumTTF, which lies in global memory 
     size_t threadId = threadIdx.x;
-
-    input[threadId] = 0.0;
-    for(int i = threadId; i<num_of_blocks; i+=blockDim.x)
-        input[threadId] += partial_sumTTF[i]; 
-    __syncthreads();
-
-    int dim = (num_of_blocks/blockDim.x) >= 1 ? blockDim.x : num_of_blocks;
-    bool odd = dim%2;
-    for (int i = dim / 2; i > 0; i >>= 1)
+    __shared__ int x;
+    x=0;
+   
+    CUDA_DEBUG_MSG("NUM OF BLOCKS: %d\n",num_of_blocks);
+    //TILING%
+    if(threadId < num_of_blocks)
     {
+        partial_reduction[threadId] = 0.0; //Initialize Partial reduction
 
-        if ((threadId  < i))
-        {
-            input[threadId] += input[threadId + i];
+        for(int i = threadId; i<num_of_blocks; i+=blockDim.x){
+            //atomicAdd(&x,1);
+            printf("ACC [ %d ] : %f\n",i,input[i]);
+            partial_reduction[threadId] += input[i];            //Apply Tiling to sum all elements outside "blockSize"
         }
-
-        if(threadId == 0 && odd)
-            input[threadId] += input[threadId + 2*i];
-        odd = i%2;
         __syncthreads();
+            
+            
+        int dim = (num_of_blocks/blockDim.x) >= 1 ? blockDim.x : num_of_blocks;
+        //int dim = min(blockDim.x, num_of_blocks);
+
+        bool odd = dim%2;
+        //REDUCTION
+        for (int i = dim / 2; i > 0; i >>= 1)
+        {
+            if ((threadId  < i))
+            {
+                partial_reduction[threadId] += partial_reduction[threadId + i];
+            }
+
+            if(threadId == 0 && odd)
+                partial_reduction[threadId] += partial_reduction[threadId + i+1];
+            odd = i%2;
+            __syncthreads();
+        }
+    
+        if(threadId == 0)
+            printf("Accumulated [%d] elements with result: %f\n",num_of_blocks,partial_reduction[0]);
+            *result = partial_reduction[0];
     }
-    if(threadId == 0)
-        *result = input[0];
 }
 
 
