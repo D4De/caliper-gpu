@@ -1190,17 +1190,14 @@ __global__ void collect_res_gpu_grid(float* input, float* result, int num_of_blo
     if(threadId < num_of_blocks)
     {
         partial_reduction[threadId] = 0.0; //Initialize Partial reduction
-        //TILING%
+        //TILING
         for(int i = threadId; i<num_of_blocks; i+=blockDim.x){
-            //atomicAdd(&x,1);
-            //printf("ACC [ %d ] : %f\n",i,input[i]);
             partial_reduction[threadId] += input[i];            //Apply Tiling to sum all elements outside "blockSize"
         }
         __syncthreads();
             
             
         int dim = (num_of_blocks/blockDim.x) >= 1 ? blockDim.x : num_of_blocks;
-        //int dim = min(blockDim.x, num_of_blocks);
 
         bool odd = dim%2;
         //REDUCTION
@@ -1251,7 +1248,7 @@ void montecarlo_simulation_cuda_launcher(configuration_description* config,doubl
     CHECK(cudaMalloc(&sumTTF_GPU    , num_of_blocks*sizeof(float)));   //Allocate Result memory
     CHECK(cudaMalloc(&sumTTFx2_GPU  , sizeof(float))); //Allocate Result memory
     
-    if(config->gpu_version == VERSION_2D_GRID && config->gpu_version == VERSION_GRID_LINEARIZED){
+    if(config->gpu_version == VERSION_2D_GRID || config->gpu_version == VERSION_GRID_LINEARIZED){
         CHECK(cudaMalloc(&states        , config->num_of_tests*config->max_cores*sizeof(curandState_t))); //Random States array
     }
     else{
