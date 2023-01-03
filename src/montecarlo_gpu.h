@@ -250,7 +250,7 @@ __global__ void montecarlo_simulation_step(simulation_state sim_state,configurat
         montecarlo_update_simulation_state(sim_state,min_index,stepT[0],left_cores,offset);
     }
 }
-
+/*
 __global__ void montecarlo_dynamic_step(simulation_state sim_state,configuration_description config,int walk_id,int left_cores)
 {
     __shared__ float    partial_sumTTF[1024];
@@ -281,11 +281,11 @@ __global__ void montecarlo_dynamic_step(simulation_state sim_state,configuration
         partial_sumTTF[core_id] += stepT;
     }
 }
-
+*/
 __global__ void montecarlo_simulation_cuda_dynamic(simulation_state sim_state,configuration_description config){
 
     unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
-
+    int offset;
     curandState_t *states = sim_state.rand_states;
 
     sim_state.sumTTF[blockIdx.x] = 0;
@@ -312,7 +312,7 @@ __global__ void montecarlo_simulation_cuda_dynamic(simulation_state sim_state,co
             int num_of_blocks = 1;// (left_cores + block_dim - 1) / block_dim;
 
             //Call simulation step dynamicly by decreasing grid size evry time a core die
-            montecarlo_dynamic_step<<<num_of_blocks,block_dim>>>(sim_state,config,left_cores);
+            //montecarlo_dynamic_step<<<num_of_blocks,block_dim>>>(sim_state,config,left_cores);
             cudaDeviceSynchronize();
             left_cores--;
         }
