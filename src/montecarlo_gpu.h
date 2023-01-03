@@ -250,88 +250,79 @@ __global__ void montecarlo_simulation_step(simulation_state sim_state,configurat
         montecarlo_update_simulation_state(sim_state,min_index,stepT[0],left_cores,offset);
     }
 }
+/*
+__global__ void montecarlo_dynamic_step(simulation_state sim_state,configuration_description config,int walk_id,int left_cores)
+{
+    __shared__ float    partial_sumTTF[1024];
+    __shared__ int      minis[1024];
 
+    unsigned int core_id = threadIdx.x;
+
+    int min;
+    float stepT;
+    if(sim_state.core_states[global_id].alive) {
+        float distributedLoad = config.initial_work_load * (float)(config.max_cores / (float)left_cores); //Calculate new Load
+        sim_state.core_states[global_id].load = distributedLoad;                                              //Update the load
+        tempModel_gpu_grid(sim_state, config, core_id, walk_id);                                          //Update the temperature mode
+
+    }
+    __syncthreads();
+
+    //FIND THE MIN stepT between cores in this block (work if maxcore < 32)
+    minis[core_id] = global_id;
+    min = prob_to_death_linearized(sim_state, config, walk_id, core_id, minis);
+    stepT = sim_state.times[walk_id*config.max_cores];
+
+    //Update the curr_r of this core
+    update_state(sim_state, config, walk_id, core_id,stepT);
+    __syncthreads();
+    //SUM THE stepT TO THE partialSumTTF
+    if(core_id == 0){
+        partial_sumTTF[core_id] += stepT;
+    }
+}
+*/
 __global__ void montecarlo_simulation_cuda_dynamic(simulation_state sim_state,configuration_description config){
 
     unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    int offset = tid * (config.rows * config.cols);
-
-    extern __shared__ float partial_sumTTF[];
-
+    int offset;
     curandState_t *states = sim_state.rand_states;
 
     sim_state.sumTTF[blockIdx.x] = 0;
-    partial_sumTTF[threadIdx.x] = 0;
 
     if(tid<config.num_of_tests){
-        double random;
-        int left_cores;
-        double stepT;
-        int minIndex;
-        double totalTime;
-        int j;
-        double t, eqT;
 
-        float* currR   = sim_state.currR;
-        float* loads   = sim_state.loads;
-        float* temps   = sim_state.temps;
-        int*   indexes = sim_state.indexes;
+        int left_cores = config.max_cores;
 
-        left_cores = config.rows * config.rows;
-
-        totalTime = 0;
-        minIndex = 0;
-
+        core_state * cores   = sim_state.core_states;
         //Initialization
-        for (j = 0; j < config.max_cores; j++) { //Also parallelizable (dont know if usefull, only for big N)
-            int index = offset + j;
-            currR[index]  = 1;
-            indexes[index] = index;
+        for (int j = 0; j < config.max_cores; j++) { //Also parallelizable (dont know if usefull, only for big N)
+            int index       = offset + j;
+
+            cores[index].curr_r    = 1;
+            cores[index].real_index  = j;
+            cores[index].load    = config.initial_work_load;
         }
-
+        
+        float res;
         while (left_cores >= config.min_cores) {
-            minIndex = -1;
-
-            //-----------Redistribute Loads among alive cores----------
-            double distributedLoad = (double)config.initial_work_load * (double)config.max_cores / (double)left_cores;
-            for (j = 0; j < left_cores; j++) {
-                int index = indexes[offset + j];    //index of alive cores
-                loads[index] = distributedLoad;
-            }
-            //Set Load of lastly dead core to 0
-            loads[indexes[offset + left_cores-1]] = 0;//Potrebbe essere qui lerrore
-
             //---------Launch Child kernel to calculate a random walk step for this thread
             //WHY I CANT RUN A 2D child KERNEL????
-            int block_dim = 1024;
-            int num_of_blocks = (left_cores + block_dim - 1) / block_dim;
+            int block_dim = 1024; //TODO FIND IN EFFICIENT WAY THE NEAREST POW OF 2 NEAR TO BLOCK
+            int num_of_blocks = 1;// (left_cores + block_dim - 1) / block_dim;
 
             //Call simulation step dynamicly by decreasing grid size evry time a core die
-            montecarlo_simulation_step<<<num_of_blocks,block_dim>>>(sim_state,config,distributedLoad,left_cores,offset,tid);
+            //montecarlo_dynamic_step<<<num_of_blocks,block_dim>>>(sim_state,config,left_cores);
             cudaDeviceSynchronize();
-
-            //partial_sumTTF[threadIdx.x] = partial_sumTTF[threadIdx.x] + stepT;
-            //TODO SAVE RESULT OF STEPT TO GLOBAL OR SHARED MEMORY
-
-            //---------Reduce number of alive core in this simulation
             left_cores--;
         }
         //END SIMULATION-----------------------------
 
-        //Sync the threads
-        __syncthreads();
-
-        //Acccumulate the results of this block
-        accumulate(partial_sumTTF,blockDim.x,config.num_of_tests);
-
         //Add the partial result of this block to the final result
         __syncthreads();
         if(threadIdx.x == 0){
-            sim_state.sumTTF[blockIdx.x] = partial_sumTTF[0]; //Each block save its result in its "ID"
+            sim_state.sumTTF[blockIdx.x] = res; //Each block save its result in its "ID"
         }
-
-        //TODO ACCUMULATE ALSO SUMTTFx2
-
     }
 }
 
@@ -1105,34 +1096,24 @@ __global__ void montecarlo_simulation_cuda_grid_linearized(simulation_state sim_
     unsigned int walk_id = blockIdx.x;
 
     unsigned int global_id = (int)core_id + walk_id * config.max_cores; //Checked All care ok,
-    CUDA_DEBUG_MSG("NumTest = %d\n",config.num_of_tests); 
 
     sumTTF_res[blockIdx.x] = 0;
-    //extern __shared__ float mem_shared[];
-    //float* partial_sumTTF = (float *)mem_shared;
-    //int* minis = (int *)((float*)mem_shared + config.block_dim + config.block_dim*threadIdx.x);  //this is different for each walk in the block
 
-    __shared__ float partial_sumTTF[1024];
-    __shared__ int minis[1024];
+    __shared__ float    partial_sumTTF[1024];
+    __shared__ int      minis[1024];
     
 
     //int * minis;
     if(core_id < config.max_cores && walk_id < config.num_of_tests){    //Padding control
         //INITIALIZE RANDOM STATE
-        
         curand_init(seed, global_id, 0, &sim_state.rand_states[global_id]);
-        CUDA_DEBUG_MSG("GlobalId = %d\n",global_id);
-
-
-            //if(walk_id>58685)printf("Printf[%d][%d]-> [%d] = %d\n",walk_id,core_id,global_id);
 
         //INITIALIZATION OF CORE STATE
         sim_state.core_states[global_id].load = config.initial_work_load;
         sim_state.core_states[global_id].curr_r = 1;
         sim_state.core_states[global_id].alive = true;
         sim_state.core_states[global_id].temp = 0;
-
-        CUDA_DEBUG_MSG("INITIAL LOAD : %f\n",config.initial_work_load);
+        
         //INITIALIZATION OF UTILS VARIABLES
         int left_cores = config.max_cores;
         partial_sumTTF[threadIdx.x] = 0;
@@ -1150,31 +1131,18 @@ __global__ void montecarlo_simulation_cuda_grid_linearized(simulation_state sim_
             __syncthreads();
 
             //FIND THE MIN stepT between cores in this block (work if maxcore < 32)
-            
-            
-            if(walk_id == 0)
-                printf("%d\n", minis[core_id]);
-            __syncthreads();
-            
             minis[core_id] = global_id;
             min = prob_to_death_linearized(sim_state, config, walk_id, core_id, minis);
-            stepT = sim_state.times[walk_id*config.max_cores];
-            int id = 3;
-            CUDA_DEBUG_MSG("DEAD CORE : %d with StepT : %f\n",min - walk_id*config.max_cores,stepT);
-            CUDA_DEBUG_MSG("-------------------\n");
+            stepT = sim_state.times[walk_id*config.max_cores]; //We access the "times[0]" of each walk
 
-
-            /*for(int i=0;i<config.max_cores;i++){
-                 CUDA_DEBUG_MSG("ALIVE[%d] : %d\n",i,sim_state.core_states[global_id+i].alive);
-            }*/
             //Update the curr_r of this core
             update_state(sim_state, config, walk_id, core_id,stepT);
             __syncthreads();
             //SUM THE stepT TO THE partialSumTTF
             if(core_id == 0){
                  partial_sumTTF[core_id] += stepT;
-                 //CUDA_DEBUG_MSG_TH(id,"PARTIAL SUMTTF: %f\n",partial_sumTTF[threadIdx.x]);
             }
+
             left_cores--;
         }
         

@@ -169,7 +169,7 @@ __device__ T accumulate_argMin(simulation_state sim_state, configuration_descrip
 		warpReduce_argMin<T>(sim_state.times,minis, threadId);
 	__syncthreads();
     */
-    CUDA_DEBUG_MSG("END MIN ACCUMULATE\n");
+   
 	return minis[0];
 }
 
