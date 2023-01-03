@@ -1114,7 +1114,7 @@ __global__ void montecarlo_simulation_cuda_grid_linearized(simulation_state sim_
 
     __shared__ float partial_sumTTF[1024];
     __shared__ int minis[1024];
-    minis[core_id] = global_id;
+    
 
     //int * minis;
     if(core_id < config.max_cores && walk_id < config.num_of_tests){    //Padding control
@@ -1136,7 +1136,7 @@ __global__ void montecarlo_simulation_cuda_grid_linearized(simulation_state sim_
         //INITIALIZATION OF UTILS VARIABLES
         int left_cores = config.max_cores;
         partial_sumTTF[threadIdx.x] = 0;
-
+        
         //RANDOM WALK SIMULATION FOR THIS CORE
         while(left_cores >= config.min_cores){
             int min;
@@ -1151,16 +1151,23 @@ __global__ void montecarlo_simulation_cuda_grid_linearized(simulation_state sim_
             __syncthreads();
 
             //FIND THE MIN stepT between cores in this block (work if maxcore < 32)
+            
+            
+            if(walk_id == 0)
+                printf("%d\n", minis[core_id]);
+            __syncthreads();
+            
+            minis[core_id] = global_id;
             min = prob_to_death_linearized(sim_state, config, walk_id, core_id, minis);
-            stepT = sim_state.times[0];
+            stepT = sim_state.times[walk_id*config.max_cores];
             int id = 3;
             CUDA_DEBUG_MSG("DEAD CORE : %d with StepT : %f\n",min - walk_id*config.max_cores,stepT);
             CUDA_DEBUG_MSG("-------------------\n");
 
-
             for(int i=0;i<config.max_cores;i++){
                  CUDA_DEBUG_MSG("ALIVE[%d] : %d\n",i,sim_state.core_states[global_id+i].alive);
             }
+            
             //Update the curr_r of this core
             update_state(sim_state, config, walk_id, core_id,stepT);
             __syncthreads();

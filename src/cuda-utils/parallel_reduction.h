@@ -170,7 +170,7 @@ __device__ T accumulate_argMin(simulation_state sim_state, configuration_descrip
 	__syncthreads();
     */
     CUDA_DEBUG_MSG("END MIN ACCUMULATE\n");
-	return minis[walk_id*config.max_cores];
+	return minis[0];
 }
 
 //-----------------------------------------------------------------------
