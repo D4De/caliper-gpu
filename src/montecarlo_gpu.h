@@ -1144,8 +1144,7 @@ __global__ void montecarlo_simulation_cuda_grid_linearized(simulation_state sim_
             if(sim_state.core_states[global_id].alive) {
                 float distributedLoad = config.initial_work_load * (float)(config.max_cores / (float)left_cores); //Calculate new Load
                 sim_state.core_states[global_id].load = distributedLoad;                                              //Update the load
-                tempModel_gpu_grid(sim_state, config, core_id, walk_id);                                          //Update the temperature model
-
+                tempModel_gpu_grid(sim_state, config, core_id, walk_id);                                          //Update the temperature mode
 
             }
             __syncthreads();
@@ -1164,10 +1163,10 @@ __global__ void montecarlo_simulation_cuda_grid_linearized(simulation_state sim_
             CUDA_DEBUG_MSG("DEAD CORE : %d with StepT : %f\n",min - walk_id*config.max_cores,stepT);
             CUDA_DEBUG_MSG("-------------------\n");
 
-            for(int i=0;i<config.max_cores;i++){
+
+            /*for(int i=0;i<config.max_cores;i++){
                  CUDA_DEBUG_MSG("ALIVE[%d] : %d\n",i,sim_state.core_states[global_id+i].alive);
-            }
-            
+            }*/
             //Update the curr_r of this core
             update_state(sim_state, config, walk_id, core_id,stepT);
             __syncthreads();
@@ -1240,8 +1239,10 @@ __global__ void collect_res_gpu_grid(float* input, float* result, int num_of_blo
 */
 void montecarlo_simulation_cuda_launcher(configuration_description* config,double * sumTTF,double * sumTTFx2)
 {
-    //TODO contain all the malloc/necessary code to call the kernel
-    //----CUDA variables:------------
+    //----------------------------------------------------------------------
+    //----CUDA variables:---------------------------------------------------
+    //----------------------------------------------------------------------
+
     float *sumTTF_GPU;   //GPU result sumTTF
     float *sumTTF_GPU_final;   //GPU result sumTTF
     float *sumTTFx2_GPU; //GPU result sumTTFx2
@@ -1251,30 +1252,44 @@ void montecarlo_simulation_cuda_launcher(configuration_description* config,doubl
 
     int num_of_blocks = (config->num_of_tests+config->block_dim-1)/config->block_dim;
     int num_of_blocks2D = (config->max_cores+config->block_dim-1)/config->block_dim;
-    //----MEMORY ALLOCATION:---------
-    CHECK(cudaMalloc(&sumTTF_GPU    , num_of_blocks*sizeof(float)));   //Allocate Result memory
-    CHECK(cudaMalloc(&sumTTFx2_GPU  , sizeof(float))); //Allocate Result memory
-    
-    if(config->gpu_version == VERSION_2D_GRID || config->gpu_version == VERSION_GRID_LINEARIZED){
+
+    //----------------------------------------------------------------------
+    //----MEMORY ALLOCATION:------------------------------------------------
+    //----------------------------------------------------------------------
+
+    CHECK(cudaMalloc(&sumTTF_GPU    , num_of_blocks*sizeof(float)));    //Allocate Result memory
+    CHECK(cudaMalloc(&sumTTFx2_GPU  , sizeof(float)));                  //Allocate Result memory
+    CHECK(cudaMalloc(&sumTTF_GPU_final, sizeof(float)));                //Allocate Result memory
+
+    allocate_simulation_state_on_device(&sim_state,*config);            //Allocate Simulation/configuration inside a dedicated datastructure
+
+    if(config->gpu_version == VERSION_2D_GRID || config->gpu_version == VERSION_GRID_LINEARIZED)
+    {
         CHECK(cudaMalloc(&states        , config->num_of_tests*config->max_cores*sizeof(curandState_t))); //Random States array
     }
-    else{
+    else
+    {
         CHECK(cudaMalloc(&states        , config->num_of_tests*sizeof(curandState_t))); //Random States array
     }
 
-    CHECK(cudaMalloc(&sumTTF_GPU_final, sizeof(float)));   //Allocate Result memory
+    //----------------------------------------------------------------------
+    //-----SIM_STATE INITIALIZATION------------------------------------------
+    //----------------------------------------------------------------------
 
-    allocate_simulation_state_on_device(&sim_state,*config);
     sim_state.sumTTF   = sumTTF_GPU;
     sim_state.sumTTFx2 = sumTTFx2_GPU;
 
     dim3 blocksPerGrid(num_of_blocks,1,1);
     dim3 threadsPerBlock(config->block_dim,1,1);
-    if(config->gpu_version != VERSION_2D_GRID  && config->gpu_version != VERSION_GRID_LINEARIZED){
+
+    if(config->gpu_version != VERSION_2D_GRID  && config->gpu_version != VERSION_GRID_LINEARIZED)
+    {
         init_random_state<<<blocksPerGrid,threadsPerBlock>>>(time(NULL),states);
         cudaDeviceSynchronize();
         CHECK_KERNELCALL();
-    }else if(config->gpu_version == VERSION_2D_GRID){
+
+    }else if(config->gpu_version == VERSION_2D_GRID)
+    {
         blocksPerGrid.y = num_of_blocks2D;
         threadsPerBlock.y = config->block_dim;
         init_random_state2D<<<blocksPerGrid,threadsPerBlock>>>(time(NULL),states, config->max_cores, config->num_of_tests);
@@ -1282,29 +1297,66 @@ void montecarlo_simulation_cuda_launcher(configuration_description* config,doubl
         CHECK_KERNELCALL();
     }
     sim_state.rand_states = states;
+
+    //----------------------------------------------------------------------
+    //-----KERNEL VERSION SELECTOR------------------------------------------
+    //----------------------------------------------------------------------
     //Execute Montecarlo simulation on GPU//,
     //TODO USE C++ TEMPLATE TO AVOID WRITING SAME CODE MULTIPLE TIME (eg at runtime modify the function to change mode)
-    if(config->gpu_version == VERSION_REDUX){
+
+
+    //---------------------------------------------------------------------------------
+    //-----REDUX VERSION---------------------------------------------------------------
+    //-----Basic Parallel reduction with shared memory and global reduction------------
+    //---------------------------------------------------------------------------------
+    if(config->gpu_version == VERSION_REDUX)
+    {
         montecarlo_simulation_cuda_redux<<<blocksPerGrid,threadsPerBlock,config->block_dim*sizeof(float)>>>(sim_state,*config,sumTTF_GPU,sumTTFx2_GPU);
         CHECK_KERNELCALL();
         cudaDeviceSynchronize();
-    }else if(config->gpu_version == VERSION_COALESCED){
+    }
+    //---------------------------------------------------------------------------------
+    //-----COALESCED VERSION-----------------------------------------------------------
+    //-----Basic Parallel reduction with shared memory and global reduction------------
+    //-----Data are distributed in a coalesced fashion---------------------------------
+    //---------------------------------------------------------------------------------
+    else if(config->gpu_version == VERSION_COALESCED)
+    {
         printf("COALESCED\n");//DA FIXARE PROBABILMENTE, RISULTATO VIENE NAN
         montecarlo_simulation_cuda_redux_coalesced<<<blocksPerGrid,threadsPerBlock,config->block_dim*sizeof(float)>>>(sim_state,*config,sumTTF_GPU,sumTTFx2_GPU);
         CHECK_KERNELCALL();
         cudaDeviceSynchronize();
-    }else if(config->gpu_version == VERSION_STRUCT_SHARED){
+    }
+    //---------------------------------------------------------------------------------
+    //-----STRUCT SHARED VERSION-------------------------------------------------------
+    //-----Basic Parallel reduction with shared memory and global reduction------------
+    //-----Data are contained in an array of structs-----------------------------------
+    //---------------------------------------------------------------------------------
+    else if(config->gpu_version == VERSION_STRUCT_SHARED)
+    {
         printf("STRUCT\n");
         montecarlo_simulation_cuda_redux_struct<<<blocksPerGrid,threadsPerBlock,config->block_dim*sizeof(float)>>>(sim_state,*config,sumTTF_GPU,sumTTFx2_GPU);
         CHECK_KERNELCALL();
         cudaDeviceSynchronize();
     }
-    else if(config->gpu_version == VERSION_DYNAMIC){
+    //---------------------------------------------------------------------------------
+    //-----DYNAMIC PROGRAMMING VERSION-------------------------------------------------
+    //-----Each Thread simulate a single core of a specific walk (2D grid)-------------
+    //-----PROBLEM WITH KERNEL OVERHEAD------------------------------------------------
+    //---------------------------------------------------------------------------------
+    else if(config->gpu_version == VERSION_DYNAMIC)
+    {
         printf("DINAMIC\n");
         montecarlo_simulation_cuda_dynamic<<<blocksPerGrid,threadsPerBlock,config->block_dim*sizeof(float)>>>(sim_state,*config);
         CHECK_KERNELCALL();
         cudaDeviceSynchronize();
-    }else if(config->gpu_version == VERSION_2D_GRID){
+    }
+    //---------------------------------------------------------------------------------
+    //-----2D GRID VERSION-------------------------------------------------
+    //-----Each Thread simulate a single core of a specific walk (2D grid)-------------
+    //-----PROBLEM WITH GRID LEVEL SYNCH AND OVERHEAD----------------------------------
+    //---------------------------------------------------------------------------------
+    else if(config->gpu_version == VERSION_2D_GRID){
         printf("GRID\n");
 
         int* min_indexes;
@@ -1340,46 +1392,61 @@ void montecarlo_simulation_cuda_launcher(configuration_description* config,doubl
         accumulate_grid_block_level<<<blocksPerGrid1, threadsPerBlock1, config->block_dim*sizeof(float)>>>(sim_state, *config, TTF_GPU, sumTTF_GPU);
         CHECK_KERNELCALL();
         cudaDeviceSynchronize();
-    }else if(config->gpu_version == VERSION_GRID_LINEARIZED){
-        config->block_dim = 256;
-        int size = config->num_of_tests * config->block_dim;
-        num_of_blocks = config->num_of_tests;
+    }
+    //---------------------------------------------------------------------------------
+    //-----2D GRID VERSION-------------------------------------------------
+    //-----Each Thread simulate a single core of a specific walk (2D grid)-------------
+    //-----same as dynamic programming but without dynamic prog------------------------
+    //---------------------------------------------------------------------------------
+    else if(config->gpu_version == VERSION_GRID_LINEARIZED)
+    {
+        printf("GRID LINEARIZED\n");
+        config->block_dim   = 256;
+        num_of_blocks       = config->num_of_tests;
 
-        printf("NUM OF BLOCKS : %d \n",num_of_blocks);
-        printf("NUM OF THREAD : %d \n",size);
         CHECK(cudaMalloc(&sumTTF_GPU    , num_of_blocks*sizeof(float)));   //Allocate Result memory
-
+        
         dim3 blocksPerGrid(num_of_blocks,1,1);
         dim3 threadsPerBlock(config->block_dim,1,1);
-        printf("GRID LINEARIZED\n");
+
         montecarlo_simulation_cuda_grid_linearized<<<blocksPerGrid,threadsPerBlock>>>(sim_state,*config, sumTTF_GPU,sumTTFx2_GPU,time(NULL));
         CHECK_KERNELCALL();
         cudaDeviceSynchronize();
-    }else if (config->gpu_version == VERSION_STRUCT_OPTIMIZED){
+    }
+    //---------------------------------------------------------------------------------
+    //-----2D GRID VERSION-------------------------------------------------
+    //-----Each Thread simulate a single core of a specific walk (2D grid)-------------
+    //-----same as dynamic programming but without dynamic prog------------------------
+    //---------------------------------------------------------------------------------
+    else if (config->gpu_version == VERSION_STRUCT_OPTIMIZED){
         printf("STRUCT OPT\n");
         montecarlo_simulation_cuda_redux_struct<<<blocksPerGrid,threadsPerBlock,config->block_dim*sizeof(float)>>>(sim_state,*config,sumTTF_GPU,sumTTFx2_GPU);
         CHECK_KERNELCALL();
         cudaDeviceSynchronize();
     }
 
-
-
-    //MODE 3 -> STRUCT + COALESCED + SHARED MEM
-    //MODE 4 -> FIXED 2D GRID OF THREAD INSTEAD OF DYNAMIC PROGRAMMING
-    
-    //WARNING!!! DOSNT COUNT PADDING IN ACCUMULATE
-    //collect_res_gpu<float><<<1,num_of_blocks/2>>>(sumTTF_GPU,sumTTF_GPU_final,num_of_blocks);
-    //collect_res_gpu_x<<<1,threadsPerBlock>>>(sumTTF_GPU,sumTTF_GPU_final,blocksPerGrid.x);
-    
-    collect_res_gpu_grid<<<1, 1024, 1024*sizeof(float)>>>(sumTTF_GPU, sumTTF_GPU_final, num_of_blocks);
-    CHECK_KERNELCALL();
+    //---------------------------------------------------------------------------------
+    //-----GLOBAL REDUCTION------------------------------------------------------------
+    //-----Sum all the partial SUMTTF of different blocks------------------------------
+    //---------------------------------------------------------------------------------
+    collect_res_gpu_grid<<<1, 1024, 1024*sizeof(float)>>>(sumTTF_GPU, sumTTF_GPU_final, num_of_blocks);     //Global reduction
+    CHECK_KERNELCALL(); 
     cudaDeviceSynchronize();
-    //----Copy back results on CPU-----------
-    
-    CHECK(cudaMemcpy(&res, sumTTF_GPU_final, sizeof(float), cudaMemcpyDeviceToHost));
-    *sumTTF = (double) res;
+    CHECK(cudaMemcpy(&res, sumTTF_GPU_final, sizeof(float), cudaMemcpyDeviceToHost));                       //Copy back results on CPU
+    *sumTTF = (double) res;                                                                                 //cast the result
 
     
+    //---------------------------------------------------------------------------------
+    //----FREE CUDA MEMORY-------------------------------------------------------------
+    //---------------------------------------------------------------------------------
+    CHECK(cudaFree(sumTTF_GPU));
+    CHECK(cudaFree(sumTTFx2_GPU));
+    CHECK(cudaFree(states));
+    free_simulation_state(&sim_state,*config);
+    cudaDeviceReset();
+}
+
+
 
     /*
     float temp[num_of_blocks];
@@ -1391,12 +1458,4 @@ void montecarlo_simulation_cuda_launcher(configuration_description* config,doubl
     *sumTTFx2 = (*sumTTF)*(*sumTTF);    //TODO sumTTF squared
     
     */
-    //----FREE CUDA MEMORY------------------
-    CHECK(cudaFree(sumTTF_GPU));
-    CHECK(cudaFree(sumTTFx2_GPU));
-    CHECK(cudaFree(states));
-    free_simulation_state(&sim_state,*config);
-    cudaDeviceReset();
-}
-
 #endif
