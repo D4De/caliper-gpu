@@ -109,7 +109,7 @@ int main(int argc, char* argv[]) {
     //------------------------------------------------------------------------------
 
     saveOnFile(&config,results,outputfilename);
-    double mttf_int = (sumTTF / num_of_tests);
+    double mttf_int = (sumTTF / config.num_of_tests);
 
     std::cout<<config.rows<<","<<config.cols<<","<<config.rows*config.cols<<","<<config.min_cores<<","<<config.initial_work_load<<","<<config.num_of_tests<<","<<ciSize<<","<<((double) timer.getTime())<<","<<mttf_int<<","<<(mttf_int / (24 * 365))<<"\n";
     benchmark.set_results(mttf_int,timer.getTime(),mean,var,ciSize);
