@@ -77,7 +77,7 @@ void allocate_simulation_state_on_device(simulation_state* state,configuration_d
     int cells = config.rows*config.cols*config.num_of_tests;
 
     //STRUCT VERSION
-    if(config.gpu_version == VERSION_STRUCT_SHARED || config.gpu_version == VERSION_2D_GRID){
+    if(config.gpu_version == VERSION_STRUCT_SHARED || config.gpu_version == VERSION_2D_GRID || config.gpu_version == VERSION_GRID_LINEARIZED){
         CHECK(cudaMalloc(&state->core_states    , cells*sizeof(core_state)));
     }
 
@@ -97,7 +97,7 @@ void allocate_simulation_state_on_device(simulation_state* state,configuration_d
 void free_simulation_state(simulation_state* state,configuration_description config){
 
     //STRUCT VERSION
-    if(config.gpu_version == VERSION_STRUCT_SHARED || config.gpu_version == VERSION_2D_GRID){
+    if(config.gpu_version == VERSION_STRUCT_SHARED || config.gpu_version == VERSION_2D_GRID || config.gpu_version == VERSION_GRID_LINEARIZED){
         CHECK(cudaFree(state->core_states));
         return;
     }

@@ -112,14 +112,7 @@ __device__ float accumulate_min(T *input, size_t dim,int num_of_elem)
 }
 
 
-template<class T>
-__device__ T argmin(T* array,int index_a,int index_b){
-    int index = array[index_a]<array[index_b] ? index_a : index_b;
 
-    array[index_a] = array[index];//MOVE MIN INTO index_a position
-    return index;
-
-}
 
 template<class T>
 __device__ void warpReduce_argMin(volatile T *input,int* minis,size_t threadId)
@@ -133,30 +126,51 @@ __device__ void warpReduce_argMin(volatile T *input,int* minis,size_t threadId)
 }
 
 template<class T>
+__device__ T argmin(T* array,int index_a,int index_b,int walk_id,int* minis){
+    int index = array[index_a]<array[index_b] ? index_a : index_b;
+    //CUDA_DEBUG_MSG("COMPARE [%d ::> %f] with [%d ::> %f] selected -> [%d ::> %f]\n",index_a,array[index_a],index_b,array[index_b],index,array[index]);
+    array[index_a] = array[index];//MOVE MIN INTO index_a position
+
+    return minis[index];
+
+}
+
+template<class T>
 __device__ T accumulate_argMin(simulation_state sim_state, configuration_description config, int walk_id, int core_id, int* minis)
 {
     unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
 	size_t threadId = threadIdx.x;
-	if (config.max_cores > 32)
-	{
-		for (size_t i = config.max_cores / 2; i > 32; i >>= 1)
-		{
 
-            if ((threadId  < i )&& (tid + i < config.max_cores))// -> those elements are initialized to 0 so not relevant
-            {
-                minis[threadId] = argmin<T>(sim_state.times,threadId,threadId + i);
+    int global_id = core_id + walk_id * config.max_cores;
+	//if (config.max_cores > 32)
+	//{
+		for (size_t i = config.max_cores / 2; i > 0; i >>= 1)
+		{  
+            if ((core_id  < i ))// -> those elements are initialized to 0 so not relevant
+            {   
+                int index_a = global_id;        //A
+                int index_b = global_id + i;    //B
+
+                int index = sim_state.times[index_a]<sim_state.times[index_b] ? index_a : index_b; // A < B ?? Which is minimum?
+
+                //CUDA_DEBUG_MSG("COMPARE [%d ::> %f] with [%d ::> %f] selected -> [%d ::> %f]\n",index_a,sim_state.times[index_a],index_b,sim_state.times[index_b],index,sim_state.times[index]);
+                sim_state.times[index_a] = sim_state.times[index];//Move minimum to coreID
+                
+                index   = index     - walk_id*config.max_cores;         //Convert Global index to local block index
+                index_a = index_a   - walk_id*config.max_cores;         //Convert Global index to local block index
+
+                minis[index_a] =  minis[index];                   //Change the min Index of this local block minis
             }
             __syncthreads();
         }
-	}
+	//}
+    /*
 	if (threadId < 32)
 		warpReduce_argMin<T>(sim_state.times,minis, threadId);
 	__syncthreads();
-
-    if (threadId == 0){
-        //printf("Partial Result = %f\n",input[0]);
-    }
-	return minis[0];
+    */
+    CUDA_DEBUG_MSG("END MIN ACCUMULATE\n");
+	return minis[walk_id*config.max_cores];
 }
 
 //-----------------------------------------------------------------------
