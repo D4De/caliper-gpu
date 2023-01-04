@@ -275,7 +275,6 @@ __global__ void montecarlo_simulation_step(simulation_state sim_state,configurat
         montecarlo_update_simulation_state(sim_state,min_index,stepT[0],left_cores,offset);
     }
 }
-
 /*
 __device__ int prob_to_death_dynamic(simulation_state sim_state, configuration_description config, int walk_id, int core_id, int* minis)
 {
@@ -309,14 +308,15 @@ __device__ int prob_to_death_dynamic(simulation_state sim_state, configuration_d
     }
     return id_min;
 }
-*/
-/*
+
+
 __global__ void montecarlo_dynamic_step(simulation_state sim_state,configuration_description config,int walk_id,int left_cores)
 {
     __shared__ float    partial_sumTTF[1024];
     __shared__ int      minis[1024];
 
     unsigned int core_id = threadIdx.x;
+    unsigned int global_id = core_id + config.max_cores*walk_id;
 
     int min;
     float stepT;
@@ -330,7 +330,7 @@ __global__ void montecarlo_dynamic_step(simulation_state sim_state,configuration
 
     //FIND THE MIN stepT between cores in this block (work if maxcore < 32)
     minis[core_id] = global_id;
-    min = prob_to_death_linearized(sim_state, config, walk_id, core_id, minis);
+    min = prob_to_death_dynamic(sim_state, config, walk_id, core_id, minis);
     stepT = sim_state.times[walk_id*config.max_cores];
 
     //Update the curr_r of this core
@@ -342,8 +342,8 @@ __global__ void montecarlo_dynamic_step(simulation_state sim_state,configuration
         //ATOMIC ADD??
     }
 }
-*/
 
+*/
 __global__ void montecarlo_simulation_cuda_dynamic(simulation_state sim_state,configuration_description config){
 
     unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -374,8 +374,8 @@ __global__ void montecarlo_simulation_cuda_dynamic(simulation_state sim_state,co
             int num_of_blocks = 1;// (left_cores + block_dim - 1) / block_dim;
 
             //Call simulation step dynamicly by decreasing grid size evry time a core die
-            //montecarlo_dynamic_step<<<num_of_blocks,block_dim>>>(sim_state,config,left_cores);
-            cudaDeviceSynchronize();
+            //montecarlo_dynamic_step<<<num_of_blocks,block_dim>>>(sim_state,config,tid,left_cores);
+            //cudaDeviceSynchronize();
             left_cores--;
         }
         //END SIMULATION-----------------------------
@@ -1034,9 +1034,6 @@ __global__ void reduce_min(simulation_state sim_state, configuration_description
     size_t threadId = threadIdx.y;
     int num_of_blocks2D = (config.max_cores+config.block_dim-1)/config.block_dim;
     
-    
-
-    //TODO review size
     //check for padding
     if(walk_id < config.num_of_tests && id < size){
         localVars[threadIdx.x*blockDim.y + threadIdx.y] = min_index[id + num_of_blocks2D*walk_id];
@@ -1065,22 +1062,17 @@ __global__ void reduce_min(simulation_state sim_state, configuration_description
     } }
 }
 
-//TODO remove core_id == 0 by reducing threads inside one block 
 __global__ void accumulate_grid_block_level(simulation_state sim_state, configuration_description config, float* TTF, float* sumTTF_res){
-    unsigned int core_id = threadIdx.y + blockIdx.y * blockDim.y;
     unsigned int walk_id = threadIdx.x + blockDim.x*blockIdx.x;
     extern __shared__ float partial_sumTTF[];
-    if(core_id == 0){
-            partial_sumTTF[threadIdx.x] = TTF[walk_id];
-            __syncthreads();
-            if(((float)(blockIdx.x*blockDim.x+blockDim.x)/(float)config.num_of_tests) > 1.0 )
-                accumulate2D(partial_sumTTF,config.num_of_tests%blockDim.x);
-            else
-                accumulate2D(partial_sumTTF,blockDim.x);
-        }
+    partial_sumTTF[threadIdx.x] = TTF[walk_id];
+    __syncthreads();
+    if(((float)(blockIdx.x*blockDim.x+blockDim.x)/(float)config.num_of_tests) > 1.0 )
+        accumulate2D(partial_sumTTF,config.num_of_tests%blockDim.x);
+    else
+        accumulate2D(partial_sumTTF,blockDim.x);
     
-    if(threadIdx.x == 0 && core_id == 0){
-        
+    if(threadIdx.x == 0){
         sumTTF_res[blockIdx.x] = partial_sumTTF[0];
     }
     
@@ -1197,8 +1189,6 @@ __global__ void montecarlo_simulation_cuda_grid_linearized(simulation_state sim_
         __syncthreads();
     }
 }
-
-
 
 
 __global__ void collect_res_gpu_grid(float* input, float* result, int num_of_blocks){
@@ -1400,7 +1390,7 @@ void montecarlo_simulation_cuda_launcher(configuration_description* config,doubl
         cudaDeviceSynchronize();
         }
         //accumulate at block level
-        accumulate_grid_block_level<<<blocksPerGrid1, threadsPerBlock1, config->block_dim*sizeof(float)>>>(sim_state, *config, TTF_GPU, sumTTF_GPU);
+        accumulate_grid_block_level<<<num_of_blocks, config->block_dim, config->block_dim*sizeof(float)>>>(sim_state, *config, TTF_GPU, sumTTF_GPU);
         CHECK_KERNELCALL();
         cudaDeviceSynchronize();
     }
