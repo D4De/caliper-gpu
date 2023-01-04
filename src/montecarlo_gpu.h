@@ -56,8 +56,7 @@ __device__ void tempModel_gpu_struct(simulation_state sim_state, configuration_d
 
         float temp = 0;
         int k,h;
-        CUDA_DEBUG_MSG("Core index = [%d,%d,%d]\n",23,getIndex(i,config.num_of_tests),33);
-        return;
+        //CUDA_DEBUG_MSG("Core index = [%d,%d,%d]\n",23,getIndex(i,config.num_of_tests),33);
 
         for (k = -1; k < 2; k++)
         {
@@ -103,41 +102,30 @@ __device__ void tempModel_gpu_struct_optimized(simulation_state sim_state, confi
     int max_cores = config.max_cores;
 
     core_state* cores = sim_state.core_states;
+    core_state tmp_core;
+
     for(int i=0;i<left_alive;i++){
-        
-        //int absolute_index = getIndex(i,config.num_of_tests);          //contain position of this core in the original grid
+
         int absolute_index = GETINDEX(i,tid,config.num_of_tests);
-        int relative_index = sim_state.core_states[absolute_index].real_index; //local position (usefull only on gpu global memory,for cpu is same as absolute)
-
-        int r = relative_index/config.cols;    //Row position into local grid
-        int c = relative_index%config.cols;    //Col position into local grid
-
+        tmp_core =  sim_state.core_states[absolute_index];          //TMP local copy of current core
         float temp = 0;
-        int k,h;
-        for (k = -1; k < 2; k++)
-        {
-            for (h = -1; h < 2; h++)
-            {
-                if ((k != 0 || h != 0) && k != h && k != -h && r + k >= 0 && r + k < config.rows && c + h >= 0 && c + h < config.cols){
-                    int isNeighbourAlive = sim_state.alives[offset + (r + k)*config.cols + (c + h)];
-                    temp +=  isNeighbourAlive * distributed_load * NEIGH_TEMP; //TODO UNROLL THIS LOOP
-                }
-            }
-        }
-        /*
-        //UNROLL THE FOR CYCLE (CHECK BORDER CASE)
-        int idx;
-        //LEFT AND RIGHT
-        idx = getIndex((r - 1)*config.cols + (c),config.num_of_tests);
-        temp += cores[idx].load * NEIGH_TEMP;
-        idx = getIndex((r + 1)*config.cols + (c),config.num_of_tests);
-        temp += cores[idx].load * NEIGH_TEMP;
-        //UP AND DOWN
-        idx = getIndex((r)*config.cols + (c + 1),config.num_of_tests);
-        temp += cores[idx].load * NEIGH_TEMP;
-        idx = getIndex((r)*config.cols + (c - 1),config.num_of_tests);
-        temp += cores[idx].load * NEIGH_TEMP;
-        */
+
+        //LOOP UNROOLING (if some neightbour is out of range then the neighbour pointer will point to a false bool (avoid if statement this way))
+        bool isNeighbourAlive;
+        int  neighbourPos;
+        //TOP
+        isNeighbourAlive = *tmp_core.top_core;
+        temp +=  isNeighbourAlive * distributed_load * NEIGH_TEMP; 
+         //BOTTOM
+        isNeighbourAlive = *tmp_core.bot_core;
+        temp +=  isNeighbourAlive * distributed_load * NEIGH_TEMP; 
+         //LEFT
+        isNeighbourAlive = *tmp_core.left_core;
+        temp +=  isNeighbourAlive * distributed_load * NEIGH_TEMP; 
+         //RIGHT
+        isNeighbourAlive = *tmp_core.right_core;
+        temp +=  isNeighbourAlive * distributed_load * NEIGH_TEMP; 
+
         cores[absolute_index].temp = ENV_TEMP + distributed_load * SELF_TEMP + temp;
     }
 
@@ -250,6 +238,41 @@ __global__ void montecarlo_simulation_step(simulation_state sim_state,configurat
         montecarlo_update_simulation_state(sim_state,min_index,stepT[0],left_cores,offset);
     }
 }
+
+/*
+__device__ int prob_to_death_dynamic(simulation_state sim_state, configuration_description config, int walk_id, int core_id, int* minis)
+{
+    //Identifier of this thread
+    int global_id = walk_id*config.max_cores + core_id;
+
+    //Random State
+    core_state s = sim_state.core_states[global_id];
+    curandState_t *states = sim_state.rand_states;
+    double random = (double)curand_uniform(&states[global_id])* s.curr_r; //current core will potentially die when its R will be equal to random. drand48() generates a number in the interval [0.0;1.0)
+
+    //Simulation Step
+    double alpha = getAlpha(s.temp);
+    double t = alpha * pow(-log(random), (double) 1 / BETA); //elapsed time from 0 to obtain the new R value equal to random
+    double eqT = alpha * pow(-log(s.curr_r), (double) 1 / BETA); //elapsed time from 0 to obtain the previous R value
+
+    //Find most probable core to die
+    sim_state.times[global_id] = FLT_MAX;       //INITIALIZE TO INFINITE
+    if(sim_state.core_states[global_id].alive){
+         sim_state.times[global_id]= t - eqT;
+    } 
+
+    __syncthreads();
+    
+    int id_min = accumulate_argMin<float>(sim_state,config,walk_id,core_id,minis);
+
+    __syncthreads();
+    if(global_id == id_min) {
+        sim_state.core_states[global_id].alive = false;
+        sim_state.core_states[global_id].load = 0.0;
+    }
+    return id_min;
+}
+*/
 /*
 __global__ void montecarlo_dynamic_step(simulation_state sim_state,configuration_description config,int walk_id,int left_cores)
 {
@@ -278,10 +301,12 @@ __global__ void montecarlo_dynamic_step(simulation_state sim_state,configuration
     __syncthreads();
     //SUM THE stepT TO THE partialSumTTF
     if(core_id == 0){
-        partial_sumTTF[core_id] += stepT;
+        sim_state.sumTTF[blockIdx.x][core_id] += stepT;
+        //ATOMIC ADD??
     }
 }
 */
+
 __global__ void montecarlo_simulation_cuda_dynamic(simulation_state sim_state,configuration_description config){
 
     unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -299,9 +324,9 @@ __global__ void montecarlo_simulation_cuda_dynamic(simulation_state sim_state,co
         for (int j = 0; j < config.max_cores; j++) { //Also parallelizable (dont know if usefull, only for big N)
             int index       = offset + j;
 
-            cores[index].curr_r    = 1;
-            cores[index].real_index  = j;
-            cores[index].load    = config.initial_work_load;
+            cores[index].curr_r         = 1;
+            cores[index].real_index     = j;
+            cores[index].load           = config.initial_work_load;
         }
         
         float res;
@@ -468,136 +493,7 @@ __global__ void montecarlo_simulation_cuda_redux_coalesced(simulation_state sim_
 
 
 __global__ void montecarlo_simulation_cuda_redux_struct(simulation_state sim_state,configuration_description config ,float * sumTTF_res,float * sumTTFx2_res){
-    CUDA_DEBUG_MSG("Initialize\n");
-    curandState_t *states = sim_state.rand_states;
-
-    unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    int offset = tid * (config.rows * config.cols);
-    //extern __shared__ unsigned int tmp_sumTTF[];
-    //extern __shared__ unsigned int tmp_sumTTFx2[]; //??? dont know if necessary
-    extern __shared__ float partial_sumTTF[];
-
-    sumTTF_res[blockIdx.x] = 0;
-    partial_sumTTF[threadIdx.x] = 0;
-
-    if(tid<config.num_of_tests){
-        double random;
-        int left_cores;
-        double stepT;
-        int minIndex;
-        double totalTime;
-        int j;
-        double t, eqT;
-
-        //Change to struct
-        core_state * cores   = sim_state.core_states;
-
-        left_cores = config.max_cores;
-        totalTime = 0;
-        minIndex = 0;
-
-        for (j = 0; j < config.max_cores; j++) { //Also parallelizable (dont know if usefull, only for big N)
-            int index = getIndex(j,config.num_of_tests);
-            //Coalesced access to struct
-            core_state curr_core = cores[index];
-            //Local Changes on Register memory (no global mem access!!)
-            curr_core.curr_r    = 1;
-            curr_core.real_index  = j;
-            curr_core.load    = config.initial_work_load;
-            //Coalescet write of core state
-            cores[index] = curr_core;
-
-            /*
-            cores[index].curr_r    = 1;
-            cores[index].real_index  = j;
-            cores[index].load    = config.initial_work_load;
-            */
-
-        }
-        CUDA_DEBUG_MSG("Start Simulation\n");
-        while (left_cores >= config.min_cores) {
-            minIndex = -1;
-
-            //-----------Redistribute Loads among alive cores----------
-            double distributedLoad = (double)config.initial_work_load * (double)config.max_cores / (double)left_cores;
-
-            //TODO UPDATE THE TEMPERATURE
-            tempModel_gpu_struct(sim_state,config,distributedLoad,left_cores);
-
-            CUDA_DEBUG_MSG("Temp\n");
-            //Set Load of alive cores
-            for (j = 0; j < left_cores; j++) {
-                int index = getIndex(j,config.num_of_tests); //Current alive core
-                core_state curr_core = cores[index]; //Coalesced access to struct
-                random =(double)curand_uniform(&states[tid])* curr_core.curr_r; //current core will potentially die when its R will be equal to random. drand48() generates a number in the interval [0.0;1.0)
-                double alpha = getAlpha(curr_core.temp);
-                t = alpha * pow(-log(random), (double) 1 / BETA); //elapsed time from 0 to obtain the new R value equal to random
-                eqT = alpha * pow(-log(curr_core.curr_r), (double) 1 / BETA); //elapsed time from 0 to obtain the previous R value
-                t = t - eqT;
-
-                //the difference between the two values represents the time elapsed from the previous failure to the current failure
-                //(we will sum to the total time the minimum of such values)
-
-                if (minIndex == -1 || (minIndex != -1 && t < stepT)) {
-
-                    minIndex = j;//Set new minimum index
-                    stepT = t;   //set new minimum time as timeStep
-                } //TODO ADD A CHECK ON MULTIPLE FAILURE IN THE SAME INSTANT OF TIME.
-            }
-
-            //---------UPDATE TOTAL TIME-----------------
-            //Current simulation time
-            partial_sumTTF[threadIdx.x] = partial_sumTTF[threadIdx.x] + stepT;
-            //totalTime = totalTime + stepT;
-            //---------UPDATE Configuration-----------------
-            if (left_cores > config.min_cores) {
-                //Swap all cells  (TODO SWAP WITH STRUCT)
-                swapStateStruct(sim_state,minIndex,left_cores,config.max_cores);
-                // compute remaining reliability for working cores
-                for (j = 0; j < left_cores; j++) {
-                    int index = getIndex(j,config.num_of_tests); //Current alive core
-                    //Coalesced Read of core state struct
-                    core_state curr_core = cores[index];
-                    //Local changes to the core state (in register memory!!)
-                    double alpha = getAlpha(curr_core.temp);
-                    eqT = alpha * pow(-log(curr_core.curr_r), (double) 1 / BETA); //TODO: fixed a buf. we have to use the eqT of the current unit and not the one of the failed unit
-                    curr_core.curr_r = exp(-pow((stepT + eqT) / alpha, BETA));
-                    //Coalesced Write of results in memory
-                    cores[index] = curr_core;
-                }
-            }
-
-            //Set Load of lastly dead core to 0
-            int index = getIndex(left_cores-1,config.num_of_tests); //Current alive core
-            core_state curr_core = cores[index];
-            curr_core.load = 0;
-            cores[index] = curr_core; //TODO , IS THIS WORTH IN RESPECT TO cores[index].load = 0???
-
-            //Decrement counter of alive core
-            left_cores--; //Reduce number of alive core in this simulation
-        }
-
-        //Sync the threads
-        __syncthreads();
-
-        //Acccumulate the results of this block
-        accumulate<float>(partial_sumTTF,blockDim.x,config.num_of_tests);
-        //atomicAdd(&(partial_sumTTF[0]),partial_sumTTF[threadIdx.x]);
-        //Add the partial result of this block to the final result
-        __syncthreads();
-        if(threadIdx.x == 0){
-            //atomicAdd(&(sumTTF_res[0]),partial_sumTTF[0]);
-            //USING ATOMIC ADD-> SAME RESULT AS CPU, WITH GLOBAL REDUCE.... NOT:.. CHECK WHY
-            printf("SUMTTF [ %d ] : %f\n",tid,partial_sumTTF[0]);
-            //Each Thread 0 assign to his block cell the result of its accumulate
-            sumTTF_res[blockIdx.x] = partial_sumTTF[0]; //Each block save its result in its "ID"
-        }
-    }
-}
-
-
-__global__ void montecarlo_simulation_cuda_redux_struct_optimized(simulation_state sim_state,configuration_description config ,float * sumTTF_res,float * sumTTFx2_res){
-    //CUDA_DEBUG_MSG("Initialize\n");
+   //CUDA_DEBUG_MSG("Initialize\n");
     curandState_t *states = sim_state.rand_states;
 
     unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -644,7 +540,6 @@ __global__ void montecarlo_simulation_cuda_redux_struct_optimized(simulation_sta
             //local_cores[threadIdx.x].load        = config.initial_work_load;
 
             cores[index] = local_cores[threadIdx.x];
-            sim_state.alives[offset + j] = true;
             //CUDA_DEBUG_MSG("INIZIALIZZA %d con %d: \n",j,offset + j);
         }
 
@@ -654,16 +549,15 @@ __global__ void montecarlo_simulation_cuda_redux_struct_optimized(simulation_sta
 
             //-----------Redistribute Loads among alive cores----------
             double distributedLoad = (double)config.initial_work_load * (double)config.max_cores / (double)left_cores;
-            /*
-            //#pragma unroll
+            #pragma unroll
             for (j = 0; j < left_cores; j++) {
                 int index = getIndex(j,config.num_of_tests);
                 cores[index].load = distributedLoad;
             }
-            */
+            
 
             //TODO UPDATE THE TEMPERATURE
-            tempModel_gpu_struct_optimized(sim_state,config,distributedLoad,left_cores);
+            tempModel_gpu_struct(sim_state,config,distributedLoad,left_cores);
         
             //Set Load of alive cores
             for (j = 0; j < left_cores; j++) {
@@ -681,7 +575,6 @@ __global__ void montecarlo_simulation_cuda_redux_struct_optimized(simulation_sta
                 //(we will sum to the total time the minimum of such values)
                 
                 if (minIndex == -1 || (minIndex != -1 && t < stepT)) {   
-                    actual_minIndex = cores[index].real_index;
                     //CUDA_DEBUG_MSG("Waaaaa potrebbe morire %d con offset %dcon %f\n",actual_minIndex,offset + actual_minIndex,t);
                     minIndex = j;//Set new minimum index
                     stepT = t;   //set new minimum time as timeStep
@@ -691,19 +584,7 @@ __global__ void montecarlo_simulation_cuda_redux_struct_optimized(simulation_sta
             //---------UPDATE TOTAL TIME-----------------
             //Current simulation time
             partial_sumTTF[threadIdx.x] = partial_sumTTF[threadIdx.x] + stepT;
-            sim_state.alives[offset + actual_minIndex] = false;//Mark core as dead!!
-            //CUDA_DEBUG_MSG("-------\n");
-            //CUDA_DEBUG_MSG("Dead core: %d\n",actual_minIndex);
-            /*
-            CUDA_DEBUG_MSG("-------\n");
-            CUDA_DEBUG_MSG("Dead core: %d\n",actual_minIndex);
-            for(int i=0;i<config.max_cores;i++){
-                CUDA_DEBUG_MSG("CORE %d is %d\n",i,sim_state.alives[offset +i]);   
-            }
-            CUDA_DEBUG_MSG("-------\n");
-            */
 
-            //totalTime = totalTime + stepT;
             //---------UPDATE Configuration-----------------
             if (left_cores > config.min_cores) {
                 //Swap all cells  (TODO SWAP WITH STRUCT)
@@ -725,8 +606,8 @@ __global__ void montecarlo_simulation_cuda_redux_struct_optimized(simulation_sta
             }
 
             //Set Load of lastly dead core to 0
-            //int index = getIndex(left_cores-1,config.num_of_tests); //Current alive core
-            //cores[index].load = 0;
+            int index = getIndex(left_cores-1,config.num_of_tests); //Current alive core
+            cores[index].load = 0;
 
             //Decrement counter of alive core
             left_cores--; //Reduce number of alive core in this simulation
@@ -737,8 +618,152 @@ __global__ void montecarlo_simulation_cuda_redux_struct_optimized(simulation_sta
         __syncthreads();
         CUDA_DEBUG_MSG("SUMTTF: %f\n", partial_sumTTF[0]);
         //Acccumulate the results of this block
-        //accumulate<float>(partial_sumTTF,blockDim.x,config.num_of_tests);
-         atomicAdd(&(partial_sumTTF[0]),partial_sumTTF[threadIdx.x]);
+        accumulate<float>(partial_sumTTF,blockDim.x,config.num_of_tests);
+
+        //Add the partial result of this block to the final result
+        __syncthreads();
+        if(threadIdx.x == 0){
+            //Each Thread 0 assign to his block cell the result of its accumulate
+            sumTTF_res[blockIdx.x] = partial_sumTTF[0]; //Each block save its result in its "ID"
+        }
+    }
+}
+
+
+__global__ void montecarlo_simulation_cuda_redux_struct_optimized(simulation_state sim_state,configuration_description config ,float * sumTTF_res,float * sumTTFx2_res){
+    //CUDA_DEBUG_MSG("Initialize\n");
+    curandState_t *states = sim_state.rand_states;
+
+    unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    int offset = tid * (config.rows * config.cols);
+
+    extern __shared__ float partial_sumTTF[];
+    __shared__ core_state local_cores[256];
+
+    sumTTF_res[blockIdx.x]      = 0;
+    partial_sumTTF[threadIdx.x] = 0;
+
+    if(tid<config.num_of_tests){
+        double random;
+        int left_cores;
+        double stepT;
+        int minIndex;
+        int actual_minIndex;
+        double totalTime;
+        int j;
+        double t, eqT;
+
+        //Change to struct
+        core_state * cores   = sim_state.core_states;
+
+        left_cores  = config.max_cores;
+        totalTime   = 0;
+        minIndex    = 0;
+
+        bool false_register = false;
+        bool out_of_range;  //True if neightbour is out of range
+
+        for (j = 0; j <  config.max_cores; j++) { //Also parallelizable (dont know if usefull, only for big N)
+            //int index = getIndex(j,config.num_of_tests);
+            int index = GETINDEX(j,tid,config.num_of_tests);
+
+            int r = j/config.cols;    //Row position into local grid
+            int c = j%config.cols;    //Col position into local grid
+
+            //Coalesced access to struct
+            //local_cores[threadIdx.x] = cores[index];  //TODO CHECK IF WE NEED IT
+
+            local_cores[threadIdx.x].curr_r      = 1;
+            local_cores[threadIdx.x].real_index  = j;
+
+            //Top
+            out_of_range = ((r - 1) < 0);
+            local_cores[threadIdx.x].top_core = out_of_range ? &false_register : &(sim_state.alives[offset + (r-1)*config.cols + c]); 
+            //Bot
+            out_of_range = ((r + 1) > config.rows);
+            local_cores[threadIdx.x].bot_core = out_of_range ? &false_register : &(sim_state.alives[offset + (r+1)*config.cols + c]); 
+            //Left
+            out_of_range = ((c - 1) < 0);
+            local_cores[threadIdx.x].left_core = out_of_range ? &false_register: &(sim_state.alives[offset + (r)*config.cols + (c-1)]); 
+            //Right
+            out_of_range = ((c + 1) > config.cols);
+            local_cores[threadIdx.x].right_core = out_of_range ? &false_register : &(sim_state.alives[offset + (r)*config.cols + (c+1)]); 
+
+            //Write back result
+            cores[index] = local_cores[threadIdx.x];
+
+
+            sim_state.alives[offset + j] = true;
+        }
+
+        //CUDA_DEBUG_MSG("Start Simulation\n");
+        while (left_cores >= config.min_cores) {
+            minIndex = -1;
+
+            //-----------Redistribute Loads among alive cores----------
+            double distributedLoad = (double)config.initial_work_load * (double)config.max_cores / (double)left_cores;
+
+            //TODO UPDATE THE TEMPERATURE
+            tempModel_gpu_struct_optimized(sim_state,config,distributedLoad,left_cores);
+        
+            //Set Load of alive cores
+            for (j = 0; j < left_cores; j++) {
+                //int index = getIndex(j,config.num_of_tests); //Current alive core
+                int index = GETINDEX(j,tid,config.num_of_tests);
+
+                local_cores[threadIdx.x] = cores[index]; //Coalesced access to struct
+                random =(double)curand_uniform(&states[tid])* local_cores[threadIdx.x].curr_r; //current core will potentially die when its R will be equal to random. drand48() generates a number in the interval [0.0;1.0)
+                double alpha = getAlpha(local_cores[threadIdx.x].temp);
+                t = alpha * pow(-log(random), (double) 1 / BETA); //elapsed time from 0 to obtain the new R value equal to random
+                eqT = alpha * pow(-log(local_cores[threadIdx.x].curr_r), (double) 1 / BETA); //elapsed time from 0 to obtain the previous R value
+                t = t - eqT;
+
+                //the difference between the two values represents the time elapsed from the previous failure to the current failure
+                //(we will sum to the total time the minimum of such values)
+                
+                if (minIndex == -1 || (minIndex != -1 && t < stepT)) {   
+                    actual_minIndex = cores[index].real_index;
+                    //CUDA_DEBUG_MSG("potrebbe morire %d con offset %dcon %f\n",actual_minIndex,offset + actual_minIndex,t);
+                    minIndex = j;//Set new minimum index
+                    stepT = t;   //set new minimum time as timeStep
+                } //TODO ADD A CHECK ON MULTIPLE FAILURE IN THE SAME INSTANT OF TIME.
+            }
+
+            //---------UPDATE TOTAL TIME-----------------
+            //Current simulation time
+            partial_sumTTF[threadIdx.x] = partial_sumTTF[threadIdx.x] + stepT;
+            sim_state.alives[offset + actual_minIndex] = false;//Mark core as dead!!
+            //CUDA_DEBUG_MSG("-------\n");
+            //CUDA_DEBUG_MSG("Dead core: %d\n",actual_minIndex);
+
+            //---------UPDATE Configuration-----------------
+            if (left_cores > config.min_cores) {
+                swapStateStructOptimized(sim_state,minIndex,left_cores,config.num_of_tests);
+                // compute remaining reliability for working cores
+                for (j = 0; j < left_cores; j++) {
+                    //int index = getIndex(j,config.num_of_tests); //Current alive core
+                    int index = GETINDEX(j,tid,config.num_of_tests);
+                    //Coalesced Read of core state struct
+                    local_cores[threadIdx.x] = cores[index];
+                    
+                    //Local changes to the core state (in register memory!!)
+                    double alpha = getAlpha(local_cores[threadIdx.x].temp);
+                    eqT = alpha * pow(-log(local_cores[threadIdx.x].curr_r), (double) 1 / BETA); //TODO: fixed a buf. we have to use the eqT of the current unit and not the one of the failed unit
+                    local_cores[threadIdx.x].curr_r = exp(-pow((stepT + eqT) / alpha, BETA));
+
+                    cores[index] = local_cores[threadIdx.x];
+                }
+            }
+
+            //Decrement counter of alive core
+            left_cores--; //Reduce number of alive core in this simulation
+        }
+
+        //SUM ALL THE CORE VALUES INSIDE THIS BLOCK INTO sumTTF[blockid]
+        //Sync the threads
+        __syncthreads();
+        //Acccumulate the results of this block
+        accumulate<float>(partial_sumTTF,blockDim.x,config.num_of_tests);
         //Add the partial result of this block to the final result
         __syncthreads();
         if(threadIdx.x == 0){
@@ -1074,11 +1099,9 @@ __device__ int prob_to_death_linearized(simulation_state sim_state, configuratio
          sim_state.times[global_id]= t - eqT;
     } 
 
-    //CUDA_DEBUG_MSG("ALIVE CORE : %d  STEPT: %f\n",core_id, sim_state.times[global_id]);
     __syncthreads();
     
     int id_min = accumulate_argMin<float>(sim_state,config,walk_id,core_id,minis);
-    //CUDA_DEBUG_MSG("MIN STEPT : %d -> %f\n",id_min,sim_state.times[id_min_global] );
 
     __syncthreads();
     if(global_id == id_min) {
@@ -1252,7 +1275,7 @@ void montecarlo_simulation_cuda_launcher(configuration_description* config,doubl
 
     if(config->gpu_version != VERSION_2D_GRID  && config->gpu_version != VERSION_GRID_LINEARIZED)
     {
-        init_random_state<<<blocksPerGrid,threadsPerBlock>>>(time(NULL),states);
+        init_random_state<<<blocksPerGrid,threadsPerBlock>>>(time(NULL),config->num_of_tests,states);
         cudaDeviceSynchronize();
         CHECK_KERNELCALL();
 
@@ -1388,7 +1411,7 @@ void montecarlo_simulation_cuda_launcher(configuration_description* config,doubl
     //---------------------------------------------------------------------------------
     else if (config->gpu_version == VERSION_STRUCT_OPTIMIZED){
         printf("STRUCT OPT\n");
-        montecarlo_simulation_cuda_redux_struct<<<blocksPerGrid,threadsPerBlock,config->block_dim*sizeof(float)>>>(sim_state,*config,sumTTF_GPU,sumTTFx2_GPU);
+        montecarlo_simulation_cuda_redux_struct_optimized<<<blocksPerGrid,threadsPerBlock,config->block_dim*sizeof(float)>>>(sim_state,*config,sumTTF_GPU,sumTTFx2_GPU);
         CHECK_KERNELCALL();
         cudaDeviceSynchronize();
     }

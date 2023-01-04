@@ -31,9 +31,11 @@
 #ifndef CUDA_UTILS_FUNCTIONS
 #define CUDA_UTILS_FUNCTIONS
 
-__global__ void init_random_state(unsigned int seed, curandState_t *states){
+__global__ void init_random_state(unsigned int seed,int max_dim, curandState_t *states){
     unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    curand_init(seed, tid, 0, &states[tid]);
+    if(tid<max_dim){
+        curand_init(seed, tid, 0, &states[tid]);
+    }
 }
 __global__ void init_random_state2D(unsigned int seed, curandState_t *states, int max_cores, int num_of_tests){
     int walk_id = threadIdx.x + blockIdx.x * blockDim.x;
