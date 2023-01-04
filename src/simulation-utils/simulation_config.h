@@ -122,7 +122,7 @@ void free_simulation_state(simulation_state* state,configuration_description con
     CHECK(cudaFree(state->indexes));
     CHECK(cudaFree(state->alives));
     CHECK(cudaFree(state->times));
-    CHECK(cudaFree(&state->false_register));
+    CHECK(cudaFree(state->false_register));
 }
 
 #endif //CUDA
@@ -177,29 +177,41 @@ void swap_core_index(int* cores,int dead_index,int size,int offset){
 
 #ifdef CUDA
 __device__
+void swapState(simulation_state sim_state,int dead_index,int left_cores,int num_of_tests)
+{
+    unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
 
-void swapState(simulation_state sim_state,int dead_index,int left_cores,int max_cores){
+    int* index = sim_state.indexes;
+    int* value = sim_state.real_pos;
+    core_state* cores = sim_state.core_states;
 
-    //Get absolute indexes from relative one
-    int last_elem   = getIndex(left_cores-1,max_cores);
-    int idxToSwap   = getIndex(dead_index,max_cores);
+    //Get some indexes
+    int last_elem   = GETINDEX((left_cores-1),tid,num_of_tests);
+    int death_i     = GETINDEX(dead_index,tid,num_of_tests);
+    
+    int temp = value[last_elem];
+    value[last_elem] = value[death_i];
+    value[death_i] = temp;
 
-    //Save the Alive core at the end of the list into a tmp val  (COALESCED)
-    int tmp_currR = sim_state.currR[last_elem];
-    int tmp_loads = sim_state.loads[last_elem];
-    int tmp_temps = sim_state.temps[last_elem];
+        //Save the Alive core at the end of the list into a tmp val  (COALESCED)
+    float tmp_currR = sim_state.currR[last_elem];
+    float tmp_loads = sim_state.loads[last_elem];
+    float tmp_temps = sim_state.temps[last_elem];
 
     //Swap dead index to end      (COALESCED WRITE, NON COALESCED READ)
-    sim_state.currR[last_elem] = sim_state.currR[idxToSwap];
-    sim_state.loads[last_elem] = sim_state.loads[idxToSwap];
-    sim_state.temps[last_elem] = sim_state.temps[idxToSwap];
-    sim_state.indexes[last_elem] = dead_index; //Save his original position of alive core swapped
+    sim_state.currR[last_elem] = sim_state.currR[death_i];
+    sim_state.loads[last_elem] = sim_state.loads[death_i];
+    sim_state.temps[last_elem] = sim_state.temps[death_i];
 
     //Put Alive core at dead position (NOT COALESCED)
     sim_state.currR[dead_index] = tmp_currR;
     sim_state.loads[dead_index] = tmp_loads;
     sim_state.temps[dead_index] = tmp_temps;
-    sim_state.indexes[dead_index] = left_cores-1; //Save original position of dead core swapped
+
+    temp = index[value[last_elem]];
+    index[value[last_elem]] = index[value[death_i]];
+    index[value[death_i]] = temp;
+    //CUDA_DEBUG_MSG("Swappato core: %d con core %d \n",left_cores-1, dead_index)
 }
 
 __device__
@@ -211,9 +223,6 @@ void swapStateStruct(simulation_state sim_state,int dead_index,int left_cores,in
     core_state* cores = sim_state.core_states;
 
     //Get some indexes
-    //int last_elem        = getIndex(left_cores-1,num_of_tests); // Last elem alive
-    //int death_i          = getIndex(dead_index,num_of_tests);   // current core to die
-    
     int last_elem   = GETINDEX((left_cores-1),tid,num_of_tests);
     int death_i     = GETINDEX(dead_index,tid,num_of_tests);
 
