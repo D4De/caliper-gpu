@@ -7,10 +7,16 @@
 
 #include "default_values.h"
 
+#define ALIVE true
+#define DEAD  false
+
 
 //----------------------------------------------------------------------------------
 //---------------SIMULATION DATA STRUCTURES-----------------------------------------
 //----------------------------------------------------------------------------------
+
+class Core_neighbourhood;
+
 
 /**
  * Allow to store the current state of a single core
@@ -43,6 +49,8 @@ struct simulation_state{
     int   * real_pos;
     bool  * alives;  //TODO remove alives array
 
+    Core_neighbourhood *neighbour_state;
+    
     bool  * false_register;
     core_state * core_states;
     float* times;   //times to death
@@ -56,6 +64,7 @@ struct simulation_state{
     float * sumTTF;
     float * sumTTFx2;
 };
+
 
 /**
  * Contain all the static configuration values initialized by user using args or initialized by default
@@ -80,7 +89,96 @@ struct configuration_description{
     float   initial_work_load;  //Initial cores workload
 };
 
+
 #ifdef CUDA
+
+#define __Host_Device__  __host__ __device__
+
+class Core_neighbourhood{
+    public:
+
+    int my_position;
+    int offset;
+    bool me;
+    bool top_core;
+    bool bot_core;
+    bool left_core;
+    bool right_core;
+
+    __Host_Device__ Core_neighbourhood(){
+        me = ALIVE;
+    }
+
+    __Host_Device__ void initialize(int my_pos,int off,configuration_description config){
+        my_position = my_pos;
+        offset      = off;
+
+        int r = my_position / config.cols;
+        int c = my_position % config.cols;
+
+        bool out_of_range;
+
+        //Top
+        out_of_range = ((r - 1) < 0);
+        bot_core = out_of_range ? DEAD : ALIVE; 
+        //Bot
+        out_of_range = ((r + 1) > config.rows);
+        top_core = out_of_range ? DEAD : ALIVE; 
+        //Left
+        out_of_range = ((c - 1) < 0);
+        left_core = out_of_range ? DEAD : ALIVE; 
+        //Right
+        out_of_range = ((c + 1) > config.cols);
+        right_core = out_of_range ? DEAD : ALIVE; 
+    }
+
+    __Host_Device__ void set_top_dead(){
+        top_core = DEAD;
+    }
+
+    __Host_Device__ void set_bot_dead(){
+        bot_core = DEAD;
+    }
+
+    __Host_Device__ void set_left_dead(){
+        left_core = DEAD;
+    }
+
+    __Host_Device__ void set_right_dead(){
+        right_core = DEAD;
+    }
+
+    //TODO PASS THE ARRAY OF NEIGHBOURS INSTEAD OF SIM_STATE
+    __Host_Device__ void update_state_after_core_die(Core_neighbourhood* neighbours,configuration_description config,simulation_state sim_state){
+        
+        int r = my_position / config.cols;
+        int c = my_position % config.cols;
+
+        //CUDA_DEBUG_MSG("CORE IN [%d][%d] is dead\n",r,c);
+        //Border check is not necessary since if "top/bot/left/right" is false then or core is dead or does not exist
+        if(top_core){
+            neighbours[((r+1)*config.cols) + (c)].set_top_dead();
+        }
+        if(bot_core){
+            neighbours[((r-1)*config.cols) + (c)].set_bot_dead();
+        }
+        if(left_core){
+            neighbours[((r)*config.cols) + (c-1)].set_left_dead();
+        }
+        if(right_core){
+            neighbours[((r)*config.cols) + (c+1)].set_right_dead();
+        }
+    }
+
+    __device__ float calculate_temperature(configuration_description config,simulation_state sim_state){
+
+    }
+};
+
+
+
+
+
 /**
  * Allocate Global Memory of gpu to store the simulation state
 */
@@ -102,6 +200,8 @@ void allocate_simulation_state_on_device(simulation_state* state,configuration_d
     CHECK(cudaMalloc(&state->alives   , cells*sizeof(bool)));   //alives
     CHECK(cudaMalloc(&state->times    , cells*sizeof(float)));  //times
     CHECK(cudaMalloc(&state->false_register, sizeof(bool)));
+
+    CHECK(cudaMalloc(&state->neighbour_state, cells*sizeof(Core_neighbourhood)));
 }
 
 /**
@@ -123,6 +223,8 @@ void free_simulation_state(simulation_state* state,configuration_description con
     CHECK(cudaFree(state->alives));
     CHECK(cudaFree(state->times));
     CHECK(cudaFree(state->false_register));
+
+    CHECK(cudaFree(state->neighbour_state));
 }
 
 #endif //CUDA
@@ -189,11 +291,12 @@ void swapState(simulation_state sim_state,int dead_index,int left_cores,int num_
     int last_elem   = GETINDEX((left_cores-1),tid,num_of_tests);
     int death_i     = GETINDEX(dead_index,tid,num_of_tests);
     
+
     int temp = value[last_elem];
     value[last_elem] = value[death_i];
     value[death_i] = temp;
 
-        //Save the Alive core at the end of the list into a tmp val  (COALESCED)
+    //Save the Alive core at the end of the list into a tmp val  (COALESCED)
     float tmp_currR = sim_state.currR[last_elem];
     float tmp_loads = sim_state.loads[last_elem];
     float tmp_temps = sim_state.temps[last_elem];
@@ -202,18 +305,41 @@ void swapState(simulation_state sim_state,int dead_index,int left_cores,int num_
     sim_state.currR[last_elem] = sim_state.currR[death_i];
     sim_state.loads[last_elem] = sim_state.loads[death_i];
     sim_state.temps[last_elem] = sim_state.temps[death_i];
+    
 
     //Put Alive core at dead position (NOT COALESCED)
     sim_state.currR[dead_index] = tmp_currR;
     sim_state.loads[dead_index] = tmp_loads;
     sim_state.temps[dead_index] = tmp_temps;
 
-    temp = index[value[last_elem]];
+    int temp2 = index[value[last_elem]];
     index[value[last_elem]] = index[value[death_i]];
-    index[value[death_i]] = temp;
+    index[value[death_i]] = temp2;
     //CUDA_DEBUG_MSG("Swappato core: %d con core %d \n",left_cores-1, dead_index)
 }
 
+
+
+__device__ 
+void swapStateOptimized (simulation_state sim_state,int dead_index,int left_cores,int num_of_tests)
+{
+    unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
+
+    int* index = sim_state.indexes;
+    int* value = sim_state.real_pos;
+    core_state* cores = sim_state.core_states;
+
+    //Get some indexes
+    int last_elem   = GETINDEX((left_cores-1),tid,num_of_tests);
+    int death_i     = GETINDEX(dead_index,tid,num_of_tests);
+
+    //Swap dead index to end      (COALESCED WRITE, NON COALESCED READ)
+    sim_state.currR[last_elem] = sim_state.currR[death_i];
+    sim_state.loads[last_elem] = sim_state.loads[death_i];
+    sim_state.temps[last_elem] = sim_state.temps[death_i];
+
+}
+template<bool optimized>
 __device__
 void swapStateStruct(simulation_state sim_state,int dead_index,int left_cores,int num_of_tests){
     unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -225,6 +351,11 @@ void swapStateStruct(simulation_state sim_state,int dead_index,int left_cores,in
     //Get some indexes
     int last_elem   = GETINDEX((left_cores-1),tid,num_of_tests);
     int death_i     = GETINDEX(dead_index,tid,num_of_tests);
+
+    if(optimized){
+        cores[death_i] = cores[last_elem];
+        return;
+    }
 
     int temp = value[last_elem];
     value[last_elem] = value[death_i];
@@ -250,10 +381,7 @@ void swapStateStructOptimized(simulation_state sim_state,int dead_index,int left
     int* value = sim_state.real_pos;
     core_state* cores = sim_state.core_states;
 
-    //Get some indexes
-    //int last_elem        = getIndex(left_cores-1,num_of_tests); // Last elem alive
-    //int death_i          = getIndex(dead_index,num_of_tests);   // current core to die
-    
+
     int last_elem   = GETINDEX((left_cores-1),tid,num_of_tests);
     int death_i     = GETINDEX(dead_index,tid,num_of_tests);
 

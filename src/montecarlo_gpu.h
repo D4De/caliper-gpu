@@ -111,6 +111,40 @@ __device__ void tempModel_gpu_coalesced(simulation_state sim_state, configuratio
 
 }
 
+__device__ void tempModel_gpu_coalesced_optimized(Core_neighbourhood* neightbours,simulation_state sim_state, configuration_description config,float distributed_load,int left_alive){
+    int tid = threadIdx.x + blockDim.x*blockIdx.x;
+    
+    int max_cores = config.max_cores;
+
+    float* loads   = sim_state.loads;
+    float* temps   = sim_state.temps;
+
+    for(int i=0;i<left_alive;i++){
+        int absolute_index = getIndex(i,config.num_of_tests);          //contain position of this core in the original grid
+        int relative_index = sim_state.indexes[absolute_index]; //local position (usefull only on gpu global memory,for cpu is same as absolute)
+
+        int r = relative_index/config.cols;    //Row position into local grid
+        int c = relative_index%config.cols;    //Col position into local grid
+
+        float temp = 0;
+        int k,h;
+        //CUDA_DEBUG_MSG("Core index = [%d,%d,%d]\n",23,getIndex(i,config.num_of_tests),33);
+
+        //TODO WE CAN TRY DOING ALL TOP, ALL BOT, ALL LEFT, ... as AN ARRAY INSTEAD OF STRUCT LIKE
+        //Core_neighbourhood tmp = neightbours[relative_index];
+        temp +=  neightbours[relative_index].top_core * distributed_load * NEIGH_TEMP; 
+         //BOTTOM
+        temp +=  neightbours[relative_index].bot_core * distributed_load * NEIGH_TEMP; 
+         //LEFT
+        temp +=  neightbours[relative_index].left_core * distributed_load * NEIGH_TEMP; 
+         //RIGHT
+        temp +=  neightbours[relative_index].right_core * distributed_load * NEIGH_TEMP; 
+
+        temps[absolute_index] = ENV_TEMP + distributed_load * SELF_TEMP + temp;
+    }
+
+}
+
 
 __device__ void tempModel_gpu_grid(simulation_state sim_state, configuration_description config, int core_id, int walk_id){
 
@@ -539,9 +573,12 @@ __global__ void montecarlo_simulation_cuda_redux(simulation_state sim_state,conf
 //-Basic parallel reduction + Swap optimization to avoid non relevant computation---
 //-Simulation info are stored in a coalesced way  1111 2222 3333 4444 ... NNNN------
 //----------------------------------------------------------------------------------
+template <bool optimized>
 __global__ void montecarlo_simulation_cuda_redux_coalesced(simulation_state sim_state,configuration_description config ,float * sumTTF_res,float * sumTTFx2_res){
     curandState_t *states = sim_state.rand_states;
     unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    int offset = tid * config.num_of_tests;
+
     //extern __shared__ unsigned int tmp_sumTTF[];
     //extern __shared__ unsigned int tmp_sumTTFx2[]; //??? dont know if necessary
     extern __shared__ float partial_sumTTF[];
@@ -563,7 +600,7 @@ __global__ void montecarlo_simulation_cuda_redux_coalesced(simulation_state sim_
         float* temps   = sim_state.temps;
         int*   indexes = sim_state.indexes;
         int*   real_pos= sim_state.real_pos;
-
+        Core_neighbourhood neighbours[1024];      //TODO HOW ALLOCATE IN GLOBAL MEMORY?
 
         left_cores = config.max_cores;
         totalTime = 0;
@@ -576,6 +613,14 @@ __global__ void montecarlo_simulation_cuda_redux_coalesced(simulation_state sim_
             real_pos[index] = index;
             currR[index]    = 1;
             loads[index]    = config.initial_work_load;
+
+            if constexpr(optimized){
+                int r = j/config.cols;    //Row position into local grid
+                int c = j%config.cols;    //Col position into local grid
+
+                neighbours[j] = Core_neighbourhood();
+                neighbours[j].initialize(j,offset,config);
+            }
         }
 
         while (left_cores >= config.min_cores) {
@@ -587,14 +632,19 @@ __global__ void montecarlo_simulation_cuda_redux_coalesced(simulation_state sim_
             //To improve both performance and divergence we remove the if(alive[j])
             //by using the indexes of alive cores instead of if(alive[j])
 
-            //Set Load of alive cores
-            for (j = 0; j < left_cores; j++) {
-                int index = GETINDEX(j,tid,config.num_of_tests);
-                loads[index] = distributedLoad;    //Each TH will access contiguous loads cell based on tid
-            }
+            if constexpr(optimized){
+                tempModel_gpu_coalesced_optimized(neighbours,sim_state,config,distributedLoad,left_cores);
+            }else{
 
-            //DA FIXARE PROBABILMENTE, RISULTATO VIENE NAN
-            tempModel_gpu_coalesced(sim_state,config,distributedLoad,left_cores);
+                //Set Load of alive cores
+                for (j = 0; j < left_cores; j++) {
+                    int index = GETINDEX(j,tid,config.num_of_tests);
+                    loads[index] = distributedLoad;    //Each TH will access contiguous loads cell based on tid
+                }
+
+                tempModel_gpu_coalesced(sim_state,config,distributedLoad,left_cores);
+            }
+           
             
             //-----------Random Walk Step computation-------------------------
             for (j = 0; j < left_cores; j++) {
@@ -613,7 +663,11 @@ __global__ void montecarlo_simulation_cuda_redux_coalesced(simulation_state sim_
                 } //TODO ADD A CHECK ON MULTIPLE FAILURE IN THE SAME INSTANT OF TIME.
             }
             //CUDA_DEBUG_MSG("MORTO CORE: %d con stepT = %f\n",minIndex,stepT);
-
+            if constexpr(optimized){
+                //neighbours[offset + minIndex].update_state_after_core_die(config,sim_state);
+                neighbours[minIndex].update_state_after_core_die(neighbours,config,sim_state);
+            }
+            
             //---------UPDATE TOTAL TIME-----------------
             //Current simulation time
             partial_sumTTF[threadIdx.x] = partial_sumTTF[threadIdx.x] + stepT;
@@ -621,7 +675,13 @@ __global__ void montecarlo_simulation_cuda_redux_coalesced(simulation_state sim_
             //---------UPDATE Configuration-----------------
             if (left_cores > config.min_cores) {
                 //Swap all cells
-                swapState(sim_state,minIndex,left_cores,config.num_of_tests);
+               
+                if constexpr(optimized){
+                     swapStateOptimized(sim_state,minIndex,left_cores,config.num_of_tests);
+                }else{
+                    swapState(sim_state,minIndex,left_cores,config.num_of_tests);
+                }
+
                 // compute remaining reliability for working cores
                 for (j = 0; j < left_cores; j++) {
                     int index = GETINDEX(j,tid,config.num_of_tests); //Current alive core
@@ -758,7 +818,7 @@ __global__ void montecarlo_simulation_cuda_redux_struct(simulation_state sim_sta
             //---------UPDATE Configuration-----------------
             if (left_cores > config.min_cores) {
                 //Swap all cells  (TODO SWAP WITH STRUCT)
-                swapStateStruct(sim_state,minIndex,left_cores,config.num_of_tests);
+                swapStateStruct<false>(sim_state,minIndex,left_cores,config.num_of_tests);
                 // compute remaining reliability for working cores
                 for (j = 0; j < left_cores; j++) {
                     //int index = getIndex(j,config.num_of_tests); //Current alive core
@@ -916,7 +976,7 @@ __global__ void montecarlo_simulation_cuda_redux_struct_optimized(simulation_sta
 
             //---------UPDATE Configuration-----------------
             if (left_cores > config.min_cores) {
-                swapStateStructOptimized(sim_state,minIndex,left_cores,config.num_of_tests);
+                swapStateStruct<true>(sim_state,minIndex,left_cores,config.num_of_tests);
                 // compute remaining reliability for working cores
                 for (j = 0; j < left_cores; j++) {
                     //int index = getIndex(j,config.num_of_tests); //Current alive core
@@ -1389,7 +1449,7 @@ void montecarlo_simulation_cuda_launcher(configuration_description* config,doubl
     else if(config->gpu_version == VERSION_COALESCED)
     {
         printf("COALESCED\n");//DA FIXARE PROBABILMENTE, RISULTATO VIENE NAN
-        montecarlo_simulation_cuda_redux_coalesced<<<blocksPerGrid,threadsPerBlock,config->block_dim*sizeof(float)>>>(sim_state,*config,sumTTF_GPU,sumTTFx2_GPU);
+        montecarlo_simulation_cuda_redux_coalesced<false><<<blocksPerGrid,threadsPerBlock,config->block_dim*sizeof(float)>>>(sim_state,*config,sumTTF_GPU,sumTTFx2_GPU);
         CHECK_KERNELCALL();
         cudaDeviceSynchronize();
     }
@@ -1487,6 +1547,12 @@ void montecarlo_simulation_cuda_launcher(configuration_description* config,doubl
     else if (config->gpu_version == VERSION_STRUCT_OPTIMIZED){
         printf("STRUCT OPT\n");
         montecarlo_simulation_cuda_redux_struct_optimized<<<blocksPerGrid,threadsPerBlock,config->block_dim*sizeof(float)>>>(sim_state,*config,sumTTF_GPU,sumTTFx2_GPU);
+        CHECK_KERNELCALL();
+        cudaDeviceSynchronize();
+    }
+    else if (config->gpu_version == VERSION_COALESCED_OPTIMIZED){
+        printf("COALESCED OPT\n");//DA FIXARE PROBABILMENTE, RISULTATO VIENE NAN
+        montecarlo_simulation_cuda_redux_coalesced<true><<<blocksPerGrid,threadsPerBlock,config->block_dim*sizeof(float)>>>(sim_state,*config,sumTTF_GPU,sumTTFx2_GPU);
         CHECK_KERNELCALL();
         cudaDeviceSynchronize();
     }
