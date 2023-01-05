@@ -142,6 +142,7 @@ __device__ T accumulate_argMin(simulation_state sim_state, configuration_descrip
 	size_t threadId = threadIdx.x;
 
     int global_id = core_id + walk_id * config.max_cores;
+    bool odd = config.max_cores%2;
 	//if (config.max_cores > 32)
 	//{
 		for (size_t i = config.max_cores / 2; i > 0; i >>= 1)
@@ -161,6 +162,22 @@ __device__ T accumulate_argMin(simulation_state sim_state, configuration_descrip
 
                 minis[index_a] =  minis[index];                   //Change the min Index of this local block minis
             }
+            if(odd && core_id == 0){
+                int index_a = global_id;        //A
+                int index_b = global_id + i*2;    //B
+
+                int index = sim_state.times[index_a]<sim_state.times[index_b] ? index_a : index_b; // A < B ?? Which is minimum?
+
+                //CUDA_DEBUG_MSG("COMPARE [%d ::> %f] with [%d ::> %f] selected -> [%d ::> %f]\n",index_a,sim_state.times[index_a],index_b,sim_state.times[index_b],index,sim_state.times[index]);
+                sim_state.times[index_a] = sim_state.times[index];//Move minimum to coreID
+                
+                index   = index     - walk_id*config.max_cores;         //Convert Global index to local block index
+                index_a = index_a   - walk_id*config.max_cores;         //Convert Global index to local block index
+
+                minis[index_a] =  minis[index];   //Change the min Index of this local block minis
+
+            }
+            odd = i%2;
             __syncthreads();
         }
 	//}
