@@ -1238,9 +1238,17 @@ __global__ void collect_res_gpu_grid(float* input, float* result, int num_of_blo
 }
 
 __device__ void tempModel_gpu_dynamic(simulation_state sim_state, configuration_description config, int core_id, int walk_id, int left_cores){
+    int offset = walk_id*config.max_cores;
+    int globalid = core_id + offset;
 
-    int r = core_id/config.cols;    //Row position into local grid
-    int c = core_id%config.cols;    //Col position into local grid
+    int absolute_index = sim_state.indexes[globalid];     //contain position of this core in the original grid
+
+    int relative_index = absolute_index - offset; //local position (usefull only on gpu global memory,for cpu is same as absolute)
+
+    int r = relative_index/config.cols;    //Row position into local grid
+    int c = relative_index%config.cols;    //Col position into local grid
+
+
 
     float temp = 0;
     int k,h;
@@ -1249,18 +1257,23 @@ __device__ void tempModel_gpu_dynamic(simulation_state sim_state, configuration_
         for (k = -1; k < 2; k++){
             for (h = -1; h < 2; h++){
                 if ((k != 0 || h != 0) && k != h && k != -h && r + k >= 0 && r + k < config.rows && c + h >= 0 && c + h < config.cols){
-                    int real_index = sim_state.core_states[walk_id*config.max_cores+(r + k)*config.cols + (c + h)].real_index;
-                    temp += sim_state.core_states[real_index].load * NEIGH_TEMP;
+                    //int real_index = sim_state.core_states[walk_id*config.max_cores+(r + k)*config.cols + (c + h)].real_index;
+                    temp += sim_state.core_states[offset+(r + k)*config.cols + (c + h)].temp * NEIGH_TEMP;
                 }
             }
         }
-        int real_index = sim_state.core_states[core_id+walk_id*config.max_cores].real_index;
-        sim_state.core_states[real_index].temp = ENV_TEMP + sim_state.core_states[real_index].load * SELF_TEMP + temp;
+        sim_state.core_states[absolute_index].temp = ENV_TEMP + sim_state.core_states[absolute_index].load * SELF_TEMP + temp;
     }
 }
    
 
-
+/***
+ * NOTE:
+ * -Si può riciclare la temp model della versione struct (uguale identica senza il ciclo for esterno)
+ * -Bisogna trovare un modo di stoppare argMin a left_core invece che maxcore (o mettere times dei morti a INF)
+ * -Bisogna CREATE AN ALTERNATIVE VERSION OF  THE swapStateStruct function that use walk_id*config_maxcore as offset instead of the coalesced offset
+ * -
+*/
 __device__ int prob_to_death_dynamic(simulation_state sim_state, configuration_description config, int walk_id, int core_id, int* minis)
 {
     //Identifier of this thread
@@ -1281,10 +1294,15 @@ __device__ int prob_to_death_dynamic(simulation_state sim_state, configuration_d
     __syncthreads();
     
     int id_min = accumulate_argMin<float>(sim_state,config,walk_id,core_id,minis);
-
     __syncthreads();
     if(global_id == id_min) {
+        int relative_index = id_min - walk_id*config.max_cores;
+        int offset = walk_id*config.max_cores;
+        swap_core_index(sim_state.indexes,relative_index,config.max_cores,offset);
+        //TODO CREATE AN ALTERNATIVE VERSION OF  THE swapStateStruct function that use walk_id*config_maxcore as offset instead of the coalesced offset
+
         //SWAP
+        /*
         sim_state.core_states[id_min].alive = false;
         sim_state.core_states[id_min].load = 0.0;
 
@@ -1295,7 +1313,7 @@ __device__ int prob_to_death_dynamic(simulation_state sim_state, configuration_d
         int t2 = sim_state.core_states[id_min].real_index;
         sim_state.core_states[id_min].real_index = sim_state.core_states[blockDim.x + walk_id*config.max_cores].real_index;
         sim_state.core_states[blockDim.x + walk_id*config.max_cores].real_index = t2;
-
+        */
     }
     return id_min;
 }
@@ -1304,9 +1322,10 @@ __device__ int prob_to_death_dynamic(simulation_state sim_state, configuration_d
 __global__ void montecarlo_dynamic_step(simulation_state sim_state,configuration_description config,int walk_id,int left_cores, float* TTF)
 {   
     __shared__ int minis[1024];
-
+    int offset =  config.max_cores*walk_id;
     unsigned int core_id = threadIdx.x;
-    unsigned int global_id = core_id + config.max_cores*walk_id;
+    unsigned int global_id = core_id + offset;
+
 
     int min;
     float stepT;
@@ -1314,7 +1333,7 @@ __global__ void montecarlo_dynamic_step(simulation_state sim_state,configuration
     sim_state.core_states[global_id].load = distributedLoad;                                              //Update the load
     tempModel_gpu_dynamic(sim_state, config, core_id, walk_id, left_cores);                                          //Update the temperature mode
     __syncthreads();
-    
+
     //FIND THE MIN stepT between cores in this block (work if maxcore < 32)
     minis[core_id] = global_id;
     min = prob_to_death_dynamic(sim_state, config, walk_id, core_id, minis);
@@ -1325,6 +1344,7 @@ __global__ void montecarlo_dynamic_step(simulation_state sim_state,configuration
     //SUM THE stepT TO THE partialSumTTF
     if(core_id == 0){
         TTF[walk_id] += stepT; 
+        //CUDA_DEBUG_MSG("Result of [%d]: %f\n",walk_id,stepT);
     }
 }
 
@@ -1342,11 +1362,13 @@ __global__ void montecarlo_simulation_cuda_dynamic(simulation_state sim_state,co
         //Initialization
         for (int j = 0; j < config.max_cores; j++) { //Also parallelizable (dont know if usefull, only for big N)
             int index       = offset + j;
-            
+            sim_state.indexes[index] = j;
+            sim_state.real_pos[index] = index;
             cores[index].curr_r         = 1;
             cores[index].real_index     = index;
             cores[index].load           = config.initial_work_load;
         }
+
         while (left_cores >= config.min_cores) {
             //---------Launch Child kernel to calculate a random walk step for this thread
             //WHY I CANT RUN A 2D child KERNEL????
@@ -1357,8 +1379,11 @@ __global__ void montecarlo_simulation_cuda_dynamic(simulation_state sim_state,co
             montecarlo_dynamic_step<<<num_of_blocks,block_dim>>>(sim_state,config,tid,left_cores, TTF);
             cudaDeviceSynchronize();
             left_cores--;
+            CUDA_DEBUG_MSG("SUMTTF: %f\n",TTF[0]);
         }
         //END SIMULATION-----------------------------
+        CUDA_DEBUG_MSG("SUMTTF: %f\n",TTF[0]);
+        //accumulate(TTF,config.num_of_tests,config.num_of_tests);
 
         //Add the partial result of this block to the final result
         __syncthreads();
@@ -1497,7 +1522,7 @@ void montecarlo_simulation_cuda_launcher(configuration_description* config,doubl
         montecarlo_simulation_cuda_dynamic<<<blocksPerGrid,threadsPerBlock,config->block_dim*sizeof(float)>>>(sim_state,*config, TTF_GPU);
         CHECK_KERNELCALL();
         cudaDeviceSynchronize();
-
+        return;
         //accumulate at block level
         accumulate_grid_block_level<<<num_of_blocks, config->block_dim>>>(sim_state, *config, TTF_GPU, sumTTF_GPU);
         CHECK_KERNELCALL();
