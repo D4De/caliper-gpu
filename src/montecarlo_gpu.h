@@ -1199,82 +1199,44 @@ __global__ void montecarlo_simulation_cuda_grid_linearized(simulation_state sim_
 }
 
 
-__global__ void collect_res_gpu_grid(float* input, float* result, int num_of_blocks){
-    extern __shared__ float partial_reduction[];   //work on this instead of partil_sumTTF, which lies in global memory 
-    size_t threadId = threadIdx.x;
-   
-    if(threadId < num_of_blocks)
-    {   
-        if(threadId == 0)
-            printf("%d\n", num_of_blocks);
-        partial_reduction[threadId] = 0.0; //Initialize Partial reduction
-        //TILING
-        for(int i = threadId; i<num_of_blocks; i+=blockDim.x){
-            partial_reduction[threadId] += input[i];            //Apply Tiling to sum all elements outside "blockSize"
-        }
-        __syncthreads();
-            
-        
-        int dim = (num_of_blocks/blockDim.x) >= 1 ? blockDim.x : num_of_blocks;
-
-        bool odd = dim%2;
-        //REDUCTION
-        for (int i = dim / 2; i > 0; i >>= 1)
-        {
-            if ((threadId  < i))
-            {
-                partial_reduction[threadId] += partial_reduction[threadId + i];
-            }
-
-            if(threadId == 0 && odd)
-                partial_reduction[threadId] += partial_reduction[threadId + i+1];
-            odd = i%2;
-            __syncthreads();
-        }
-    
-        if(threadId == 0)
-            *result = partial_reduction[0];
-    }
-}
-
 __device__ void tempModel_gpu_dynamic(simulation_state sim_state, configuration_description config, int core_id, int walk_id, int left_cores){
+
+    core_state* cores = sim_state.core_states;
     int offset = walk_id*config.max_cores;
-    int globalid = core_id + offset;
-
-    int absolute_index = sim_state.indexes[globalid];     //contain position of this core in the original grid
-
-    int relative_index = absolute_index - offset; //local position (usefull only on gpu global memory,for cpu is same as absolute)
+    int absolute_index = offset + core_id;          //contain position of this core in the original grid
+    int relative_index = sim_state.indexes[absolute_index]; //local position (usefull only on gpu global memory,for cpu is same as absolute)
 
     int r = relative_index/config.cols;    //Row position into local grid
     int c = relative_index%config.cols;    //Col position into local grid
 
-
-
     float temp = 0;
     int k,h;
+        //CUDA_DEBUG_MSG("Core index = [%d,%d,%d]\n",23,getIndex(i,config.num_of_tests),33);
 
-    if(core_id<left_cores){
-        for (k = -1; k < 2; k++){
-            for (h = -1; h < 2; h++){
-                if ((k != 0 || h != 0) && k != h && k != -h && r + k >= 0 && r + k < config.rows && c + h >= 0 && c + h < config.cols){
-                    //int real_index = sim_state.core_states[walk_id*config.max_cores+(r + k)*config.cols + (c + h)].real_index;
-                    temp += sim_state.core_states[offset+(r + k)*config.cols + (c + h)].temp * NEIGH_TEMP;
-                }
+    for (k = -1; k < 2; k++)
+    {
+        for (h = -1; h < 2; h++)
+        {
+            if ((k != 0 || h != 0) && k != h && k != -h && r + k >= 0 && r + k < config.rows && c + h >= 0 && c + h < config.cols){
+                int idx = offset +  (r + k)*config.cols + (c + h);
+                //int ld = (indexes[idx] < left_alive) ? distributed_load : 0;
+                temp += cores[idx].load * NEIGH_TEMP;
             }
-        }
-        sim_state.core_states[absolute_index].temp = ENV_TEMP + sim_state.core_states[absolute_index].load * SELF_TEMP + temp;
+         }
     }
+
+    cores[absolute_index].temp = ENV_TEMP + cores[absolute_index].load * SELF_TEMP + temp;
 }
    
 
 /***
  * NOTE:
- * -Si può riciclare la temp model della versione struct (uguale identica senza il ciclo for esterno)
+ * -(DONE) Si può riciclare la temp model della versione struct (uguale identica senza il ciclo for esterno) 
  * -Bisogna trovare un modo di stoppare argMin a left_core invece che maxcore (o mettere times dei morti a INF)
  * -Bisogna CREATE AN ALTERNATIVE VERSION OF  THE swapStateStruct function that use walk_id*config_maxcore as offset instead of the coalesced offset
- * -
+ * -Possibili problemi da trip mentale, in minis va globalId oppure coreId????
 */
-__device__ int prob_to_death_dynamic(simulation_state sim_state, configuration_description config, int walk_id, int core_id, int* minis)
+__device__ int prob_to_death_dynamic(simulation_state sim_state, configuration_description config, int walk_id, int core_id, int* minis,int left_cores)
 {
     //Identifier of this thread
     int global_id = walk_id*config.max_cores + core_id;
@@ -1298,7 +1260,8 @@ __device__ int prob_to_death_dynamic(simulation_state sim_state, configuration_d
     if(global_id == id_min) {
         int relative_index = id_min - walk_id*config.max_cores;
         int offset = walk_id*config.max_cores;
-        swap_core_index(sim_state.indexes,relative_index,config.max_cores,offset);
+        swapStateDynamic(sim_state,(id_min-offset),left_cores,offset); //We give (id_min-offset) becouse the swap then use relative index
+        sim_state.times[offset + left_cores-1] = FLT_MAX;
         //TODO CREATE AN ALTERNATIVE VERSION OF  THE swapStateStruct function that use walk_id*config_maxcore as offset instead of the coalesced offset
 
         //SWAP
@@ -1336,7 +1299,7 @@ __global__ void montecarlo_dynamic_step(simulation_state sim_state,configuration
 
     //FIND THE MIN stepT between cores in this block (work if maxcore < 32)
     minis[core_id] = global_id;
-    min = prob_to_death_dynamic(sim_state, config, walk_id, core_id, minis);
+    min = prob_to_death_dynamic(sim_state, config, walk_id, core_id, minis,left_cores);
     stepT = sim_state.times[walk_id*config.max_cores];
     //Update the curr_r of this core
     update_state(sim_state, config, walk_id, core_id ,stepT);
@@ -1379,7 +1342,7 @@ __global__ void montecarlo_simulation_cuda_dynamic(simulation_state sim_state,co
             montecarlo_dynamic_step<<<num_of_blocks,block_dim>>>(sim_state,config,tid,left_cores, TTF);
             cudaDeviceSynchronize();
             left_cores--;
-            CUDA_DEBUG_MSG("SUMTTF: %f\n",TTF[0]);
+            //CUDA_DEBUG_MSG("SUMTTF: %f\n",TTF[0]);
         }
         //END SIMULATION-----------------------------
         CUDA_DEBUG_MSG("SUMTTF: %f\n",TTF[0]);
@@ -1390,6 +1353,43 @@ __global__ void montecarlo_simulation_cuda_dynamic(simulation_state sim_state,co
     }
 }
 
+__global__ void collect_res_gpu_grid(float* input, float* result, int num_of_blocks){
+    extern __shared__ float partial_reduction[];   //work on this instead of partil_sumTTF, which lies in global memory 
+    size_t threadId = threadIdx.x;
+   
+    if(threadId < num_of_blocks)
+    {   
+        if(threadId == 0)
+            printf("%d\n", num_of_blocks);
+        partial_reduction[threadId] = 0.0; //Initialize Partial reduction
+        //TILING
+        for(int i = threadId; i<num_of_blocks; i+=blockDim.x){
+            partial_reduction[threadId] += input[i];            //Apply Tiling to sum all elements outside "blockSize"
+        }
+        __syncthreads();
+            
+        
+        int dim = (num_of_blocks/blockDim.x) >= 1 ? blockDim.x : num_of_blocks;
+
+        bool odd = dim%2;
+        //REDUCTION
+        for (int i = dim / 2; i > 0; i >>= 1)
+        {
+            if ((threadId  < i))
+            {
+                partial_reduction[threadId] += partial_reduction[threadId + i];
+            }
+
+            if(threadId == 0 && odd)
+                partial_reduction[threadId] += partial_reduction[threadId + i+1];
+            odd = i%2;
+            __syncthreads();
+        }
+    
+        if(threadId == 0)
+            *result = partial_reduction[0];
+    }
+}
 
 /**
  * -Preparation and launch of Simulation
@@ -1522,11 +1522,12 @@ void montecarlo_simulation_cuda_launcher(configuration_description* config,doubl
         montecarlo_simulation_cuda_dynamic<<<blocksPerGrid,threadsPerBlock,config->block_dim*sizeof(float)>>>(sim_state,*config, TTF_GPU);
         CHECK_KERNELCALL();
         cudaDeviceSynchronize();
-        return;
+        sumTTF_GPU = TTF_GPU;
+        num_of_blocks = config->num_of_tests;
         //accumulate at block level
-        accumulate_grid_block_level<<<num_of_blocks, config->block_dim>>>(sim_state, *config, TTF_GPU, sumTTF_GPU);
-        CHECK_KERNELCALL();
-        cudaDeviceSynchronize();
+        //accumulate_grid_block_level<<<num_of_blocks, config->block_dim>>>(sim_state, *config, TTF_GPU, sumTTF_GPU);
+        //CHECK_KERNELCALL();
+        //cudaDeviceSynchronize();
         
     }
     //---------------------------------------------------------------------------------

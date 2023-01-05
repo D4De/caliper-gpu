@@ -373,7 +373,7 @@ void swapStateStruct(simulation_state sim_state,int dead_index,int left_cores,in
 }
 
 __device__
-void swapStateDynamic(simulation_state sim_state,int dead_index,int offset,int left_cores,int num_of_tests){
+void swapStateDynamic(simulation_state sim_state,int dead_index,int left_cores,int offset){
 
     int* index = sim_state.indexes;
     int* value = sim_state.real_pos;
@@ -381,7 +381,7 @@ void swapStateDynamic(simulation_state sim_state,int dead_index,int offset,int l
 
     //Get some indexes
     int last_elem   = offset + (left_cores-1);
-    int death_i     = offset + (dead_index-1);
+    int death_i     = offset + (dead_index);
 
     int temp = value[last_elem];
     value[last_elem] = value[death_i];
