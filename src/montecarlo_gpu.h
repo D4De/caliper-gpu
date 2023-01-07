@@ -1359,8 +1359,6 @@ __global__ void collect_res_gpu_grid(float* input, float* result, int num_of_blo
    
     if(threadId < num_of_blocks)
     {   
-        if(threadId == 0)
-            printf("%d\n", num_of_blocks);
         partial_reduction[threadId] = 0.0; //Initialize Partial reduction
         //TILING
         for(int i = threadId; i<num_of_blocks; i+=blockDim.x){
@@ -1491,7 +1489,7 @@ void montecarlo_simulation_cuda_launcher(configuration_description* config,doubl
     //---------------------------------------------------------------------------------
     else if(config->gpu_version == VERSION_COALESCED)
     {
-        printf("COALESCED\n");//DA FIXARE PROBABILMENTE, RISULTATO VIENE NAN
+        //printf("COALESCED\n");//DA FIXARE PROBABILMENTE, RISULTATO VIENE NAN
         montecarlo_simulation_cuda_redux_coalesced<false><<<blocksPerGrid,threadsPerBlock,config->block_dim*sizeof(float)>>>(sim_state,*config,sumTTF_GPU,sumTTFx2_GPU);
         CHECK_KERNELCALL();
         cudaDeviceSynchronize();
