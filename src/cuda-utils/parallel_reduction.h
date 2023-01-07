@@ -136,16 +136,16 @@ __device__ T argmin(T* array,int index_a,int index_b,int walk_id,int* minis){
 }
 
 template<class T>
-__device__ T accumulate_argMin(simulation_state sim_state, configuration_description config, int walk_id, int core_id, int* minis)
+__device__ T accumulate_argMin(simulation_state sim_state, configuration_description config, int walk_id, int core_id, int* minis,int dim)
 {
     unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
 	size_t threadId = threadIdx.x;
 
     int global_id = core_id + walk_id * config.max_cores;
-    bool odd = config.max_cores%2;
+    bool odd = dim%2;
 	//if (config.max_cores > 32)
 	//{
-		for (size_t i = config.max_cores / 2; i > 0; i >>= 1)
+		for (size_t i = dim / 2; i > 0; i >>= 1)
 		{  
             if ((core_id  < i ))// -> those elements are initialized to 0 so not relevant
             {   

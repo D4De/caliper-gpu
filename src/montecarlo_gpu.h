@@ -1076,12 +1076,15 @@ __global__ void accumulate_grid_block_level(simulation_state sim_state, configur
 __device__ void update_state(simulation_state sim_state, configuration_description config, int walk_id, int core_id, float stepT){
     int global_id = walk_id*config.max_cores + core_id;
     core_state* s = &sim_state.core_states[global_id];
+
     if(s->alive){
         double alpha = getAlpha(s->temp);
         double eqT = alpha * pow(-log(s->curr_r), (double) 1 / BETA); //TODO: fixed a buf. we have to use the eqT of the current unit and not the one of the failed unit
         s->curr_r = exp(-pow(((double)stepT + eqT) / alpha, BETA));
+
     }
 }
+
 
 __device__ int prob_to_death_linearized(simulation_state sim_state, configuration_description config, int walk_id, int core_id, int* minis)
 {
@@ -1108,7 +1111,7 @@ __device__ int prob_to_death_linearized(simulation_state sim_state, configuratio
 
     __syncthreads();
     
-    int id_min = accumulate_argMin<float>(sim_state,config,walk_id,core_id,minis);
+    int id_min = accumulate_argMin<float>(sim_state,config,walk_id,core_id,minis,config.max_cores);
 
     __syncthreads();
     if(global_id == id_min) {
@@ -1219,13 +1222,40 @@ __device__ void tempModel_gpu_dynamic(simulation_state sim_state, configuration_
         {
             if ((k != 0 || h != 0) && k != h && k != -h && r + k >= 0 && r + k < config.rows && c + h >= 0 && c + h < config.cols){
                 int idx = offset +  (r + k)*config.cols + (c + h);
+                int index = sim_state.indexes[idx];
                 //int ld = (indexes[idx] < left_alive) ? distributed_load : 0;
-                temp += cores[idx].load * NEIGH_TEMP;
+                temp += cores[index].load * NEIGH_TEMP;
             }
          }
     }
 
     cores[absolute_index].temp = ENV_TEMP + cores[absolute_index].load * SELF_TEMP + temp;
+}
+
+__device__ void tempModel_gpu_dynamic_opt(simulation_state sim_state, configuration_description config,int distributed_load, int core_id, int walk_id, int left_cores){
+
+    int offset = walk_id*config.max_cores;
+    int absolute_index = offset + core_id;          //contain position of this core in the original grid
+
+    core_state tmp_core =  sim_state.core_states[absolute_index];          //TMP local copy of current core
+    float temp = 0;
+
+    //LOOP UNROOLING (if some neightbour is out of range then the neighbour pointer will point to a false bool (avoid if statement this way))
+    bool isNeighbourAlive;
+    int  neighbourPos;
+    //TOP
+    isNeighbourAlive = *tmp_core.top_core;
+    temp +=  isNeighbourAlive * distributed_load * NEIGH_TEMP; 
+    //BOTTOM
+    isNeighbourAlive = *tmp_core.bot_core;
+    temp +=  isNeighbourAlive * distributed_load * NEIGH_TEMP; 
+    //LEFT
+    isNeighbourAlive = *tmp_core.left_core;
+    temp +=  isNeighbourAlive * distributed_load * NEIGH_TEMP; 
+    //RIGHT
+    isNeighbourAlive = *tmp_core.right_core;
+    temp +=  isNeighbourAlive * distributed_load * NEIGH_TEMP; 
+    sim_state.core_states[absolute_index].temp = ENV_TEMP + distributed_load * SELF_TEMP + temp;
 }
    
 
@@ -1253,15 +1283,31 @@ __device__ int prob_to_death_dynamic(simulation_state sim_state, configuration_d
     //Find most probable core to die
     sim_state.times[global_id]= t - eqT;
 
+    //if(walk_id == 0 ) printf("TIME[%d]: %f\n",global_id,sim_state.times[global_id]);
     __syncthreads();
     
-    int id_min = accumulate_argMin<float>(sim_state,config,walk_id,core_id,minis);
+    //Select the Core with highest probability of death
+    int id_min = accumulate_argMin<float>(sim_state,config,walk_id,core_id,minis,left_cores);
+        int offset = walk_id*config.max_cores;
+    if(walk_id == 0 ) printf("ALIVE[%d]: %d\n",s.real_index,sim_state.alives[s.real_index+offset]);
+
+    //Update some info about the dead core
     __syncthreads();
     if(global_id == id_min) {
-        int relative_index = id_min - walk_id*config.max_cores;
-        int offset = walk_id*config.max_cores;
-        swapStateDynamic(sim_state,(id_min-offset),left_cores,offset); //We give (id_min-offset) becouse the swap then use relative index
-        sim_state.times[offset + left_cores-1] = FLT_MAX;
+
+        if(walk_id == 0 ) printf("MINIMUM -> %d: %f\n",id_min,sim_state.times[offset]);
+        if(walk_id == 0 ) printf("----------------\n");
+        
+        int relative_index = id_min - offset;
+        
+        swapStateDynamic(sim_state,relative_index,left_cores,offset); //We give (id_min-offset) becouse the swap then use relative index
+        //sim_state.times[offset + left_cores-1] = FLT_MAX;
+        sim_state.core_states[offset + left_cores-1].load = 0;
+        sim_state.core_states[offset + left_cores-1].alive = DEAD;
+
+        int real_index_of_dead = sim_state.core_states[offset + left_cores-1].real_index;
+        sim_state.alives[real_index_of_dead + offset] = false;//Mark core as dead!!
+
         //TODO CREATE AN ALTERNATIVE VERSION OF  THE swapStateStruct function that use walk_id*config_maxcore as offset instead of the coalesced offset
 
         //SWAP
@@ -1286,21 +1332,25 @@ __global__ void montecarlo_dynamic_step(simulation_state sim_state,configuration
 {   
     __shared__ int minis[1024];
     int offset =  config.max_cores*walk_id;
+    
     unsigned int core_id = threadIdx.x;
     unsigned int global_id = core_id + offset;
 
-
+    //UPDATE THE LOAD
     int min;
     float stepT;
     float distributedLoad = config.initial_work_load * (float)(config.max_cores / (float)left_cores); //Calculate new Load
     sim_state.core_states[global_id].load = distributedLoad;                                              //Update the load
-    tempModel_gpu_dynamic(sim_state, config, core_id, walk_id, left_cores);                                          //Update the temperature mode
+    
+    //UPDATE TEMPERATURE MODEL
+    tempModel_gpu_dynamic_opt(sim_state, config,distributedLoad, core_id, walk_id, left_cores);                                          //Update the temperature mode
     __syncthreads();
 
     //FIND THE MIN stepT between cores in this block (work if maxcore < 32)
     minis[core_id] = global_id;
     min = prob_to_death_dynamic(sim_state, config, walk_id, core_id, minis,left_cores);
-    stepT = sim_state.times[walk_id*config.max_cores];
+    stepT = sim_state.times[offset]; //Times[0] of a specific walk (times is not swapped)
+    
     //Update the curr_r of this core
     update_state(sim_state, config, walk_id, core_id ,stepT);
     __syncthreads();
@@ -1311,25 +1361,48 @@ __global__ void montecarlo_dynamic_step(simulation_state sim_state,configuration
     }
 }
 
+__device__ bool _false_register_ = false;
 
 __global__ void montecarlo_simulation_cuda_dynamic(simulation_state sim_state,configuration_description config, float* TTF){
-    unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    int offset = tid*config.max_cores;
-    curandState_t *states = sim_state.rand_states;
-    TTF[tid] = 0.0;
-    
-    if(tid<config.num_of_tests){
+    unsigned int walk_id = threadIdx.x + blockIdx.x * blockDim.x;
 
+    int offset = walk_id*config.max_cores;
+
+    curandState_t *states = sim_state.rand_states;
+    TTF[walk_id] = 0.0;
+    
+    if(walk_id<config.num_of_tests){
+        bool out_of_range;
         int left_cores = config.max_cores;
         core_state * cores   = sim_state.core_states;
         //Initialization
         for (int j = 0; j < config.max_cores; j++) { //Also parallelizable (dont know if usefull, only for big N)
             int index       = offset + j;
-            sim_state.indexes[index] = j;
+
+            sim_state.indexes[index]  = j;
             sim_state.real_pos[index] = index;
+
+            sim_state.alives[index]     = ALIVE;
+            cores[index].alive          = ALIVE;
             cores[index].curr_r         = 1;
-            cores[index].real_index     = index;
+            cores[index].real_index     = j;
             cores[index].load           = config.initial_work_load;
+
+            int r = j/config.cols;    //Row position into local grid
+            int c = j%config.cols;    //Col position into local grid
+
+            //Top
+            out_of_range = ((r - 1) < 0);
+            cores[index].top_core = out_of_range ? &_false_register_ : &(sim_state.alives[offset + (r-1)*config.cols + c]); 
+            //Bot
+            out_of_range = ((r + 1) > config.rows);
+            cores[index].bot_core = out_of_range ? &_false_register_ : &(sim_state.alives[offset + (r+1)*config.cols + c]); 
+            //Left
+            out_of_range = ((c - 1) < 0);
+            cores[index].left_core = out_of_range ? &_false_register_: &(sim_state.alives[offset + (r)*config.cols + (c-1)]); 
+            //Right
+            out_of_range = ((c + 1) > config.cols);
+            cores[index].right_core = out_of_range ? &_false_register_ : &(sim_state.alives[offset + (r)*config.cols + (c+1)]); 
         }
 
         while (left_cores >= config.min_cores) {
@@ -1339,7 +1412,7 @@ __global__ void montecarlo_simulation_cuda_dynamic(simulation_state sim_state,co
             int num_of_blocks = 1;// (left_cores + block_dim - 1) / block_dim;
 
             //Call simulation step dynamicly by decreasing grid size evry time a core die
-            montecarlo_dynamic_step<<<num_of_blocks,block_dim>>>(sim_state,config,tid,left_cores, TTF);
+            montecarlo_dynamic_step<<<num_of_blocks,block_dim>>>(sim_state,config,walk_id,left_cores, TTF);
             cudaDeviceSynchronize();
             left_cores--;
             //CUDA_DEBUG_MSG("SUMTTF: %f\n",TTF[0]);

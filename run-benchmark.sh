@@ -10,7 +10,8 @@ WL=0
 #EXEC=./caliper
 EXEC=./gpu_exec
 EXTRA_ARG=-g
-VERSION=6
+VERSION=0
+BLOCKS=32
 #EXTRA_ARG=-c\ 0.95\ 0.005
 #---ARG0: OUTPUT FILE---------------
 if [ -z "$1" ]
@@ -49,8 +50,8 @@ do
     MIN_CORE=`echo "scale=0; ($MAX_CORE)/2" | bc`
     WORKLOAD=`echo "scale=4; $MIN_CORE / ($num_cores * $num_cores)" | bc`
     echo "COMPUTING $MAX_CORE  with mincore = $MIN_CORE"
-    echo $EXEC $num_cores $num_cores $MIN_CORE $WORKLOAD $EXTRA_ARG $VERSION
-    $EXEC $num_cores $num_cores $MIN_CORE $WORKLOAD $EXTRA_ARG $VERSION 256>> $OUTPUT_FILE 
+    echo $EXEC $num_cores $num_cores $MIN_CORE $WORKLOAD $EXTRA_ARG $VERSION $BLOCKS
+    $EXEC $num_cores $num_cores $MIN_CORE $WORKLOAD $EXTRA_ARG $VERSION $BLOCKS>> $OUTPUT_FILE 
 
 done
 
@@ -65,7 +66,8 @@ do
     MIN_CORE=`echo "scale=0; ($MAX_CORE)/2" | bc`
     WORKLOAD=`echo "scale=4; $MIN_CORE / ($num_cores * $num_cores)" | bc`
     echo "COMPUTING $MAX_CORE  with mincore = $MIN_CORE"
-    $EXEC $num_cores $num_cores $MIN_CORE $WORKLOAD $EXTRA_ARG $VERSION 256>> $OUTPUT_FILE 
+    echo $EXEC $num_cores $num_cores $MIN_CORE $WORKLOAD $EXTRA_ARG $VERSION $BLOCKS
+    $EXEC $num_cores $num_cores $MIN_CORE $WORKLOAD $EXTRA_ARG $VERSION $BLOCKS>> $OUTPUT_FILE 
     
 
 done
