@@ -200,8 +200,10 @@ void allocate_simulation_state_on_device(simulation_state* state,configuration_d
     CHECK(cudaMalloc(&state->alives   , cells*sizeof(bool)));   //alives
     CHECK(cudaMalloc(&state->times    , cells*sizeof(float)));  //times
     CHECK(cudaMalloc(&state->false_register, sizeof(bool)));
-
-    CHECK(cudaMalloc(&state->neighbour_state, cells*sizeof(Core_neighbourhood)));
+    
+    if(config.gpu_version == VERSION_COALESCED_OPTIMIZED){
+        CHECK(cudaMalloc(&state->neighbour_state, cells*sizeof(Core_neighbourhood)));
+    }
 }
 
 /**
@@ -212,7 +214,6 @@ void free_simulation_state(simulation_state* state,configuration_description con
     //STRUCT VERSION
     if(config.gpu_version == VERSION_STRUCT_SHARED || config.gpu_version == VERSION_DYNAMIC || config.gpu_version == VERSION_STRUCT_OPTIMIZED || config.gpu_version == VERSION_2D_GRID || config.gpu_version == VERSION_GRID_LINEARIZED){
         CHECK(cudaFree(state->core_states));
-        return;
     }
 
     //ALL OTHER VERSIONS
@@ -224,7 +225,9 @@ void free_simulation_state(simulation_state* state,configuration_description con
     CHECK(cudaFree(state->times));
     CHECK(cudaFree(state->false_register));
 
-    CHECK(cudaFree(state->neighbour_state));
+    if(config.gpu_version == VERSION_COALESCED_OPTIMIZED){
+        CHECK(cudaFree(state->neighbour_state));
+    }
 }
 
 #endif //CUDA
