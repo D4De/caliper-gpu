@@ -1286,17 +1286,14 @@ __device__ int prob_to_death_dynamic(simulation_state sim_state, configuration_d
     //if(walk_id == 0 ) printf("TIME[%d]: %f\n",global_id,sim_state.times[global_id]);
     __syncthreads();
     
+
     //Select the Core with highest probability of death
     int id_min = accumulate_argMin<float>(sim_state,config,walk_id,core_id,minis,left_cores);
         int offset = walk_id*config.max_cores;
-    if(walk_id == 0 ) printf("ALIVE[%d]: %d\n",s.real_index,sim_state.alives[s.real_index+offset]);
 
     //Update some info about the dead core
     __syncthreads();
     if(global_id == id_min) {
-
-        if(walk_id == 0 ) printf("MINIMUM -> %d: %f\n",id_min,sim_state.times[offset]);
-        if(walk_id == 0 ) printf("----------------\n");
         
         int relative_index = id_min - offset;
         
@@ -1342,6 +1339,7 @@ __global__ void montecarlo_dynamic_step(simulation_state sim_state,configuration
     float distributedLoad = config.initial_work_load * (float)(config.max_cores / (float)left_cores); //Calculate new Load
     sim_state.core_states[global_id].load = distributedLoad;                                              //Update the load
     
+
     //UPDATE TEMPERATURE MODEL
     tempModel_gpu_dynamic_opt(sim_state, config,distributedLoad, core_id, walk_id, left_cores);                                          //Update the temperature mode
     __syncthreads();
@@ -1395,13 +1393,13 @@ __global__ void montecarlo_simulation_cuda_dynamic(simulation_state sim_state,co
             out_of_range = ((r - 1) < 0);
             cores[index].top_core = out_of_range ? &_false_register_ : &(sim_state.alives[offset + (r-1)*config.cols + c]); 
             //Bot
-            out_of_range = ((r + 1) > config.rows);
+            out_of_range = ((r + 1) >= config.rows);
             cores[index].bot_core = out_of_range ? &_false_register_ : &(sim_state.alives[offset + (r+1)*config.cols + c]); 
             //Left
             out_of_range = ((c - 1) < 0);
             cores[index].left_core = out_of_range ? &_false_register_: &(sim_state.alives[offset + (r)*config.cols + (c-1)]); 
             //Right
-            out_of_range = ((c + 1) > config.cols);
+            out_of_range = ((c + 1) >= config.cols);
             cores[index].right_core = out_of_range ? &_false_register_ : &(sim_state.alives[offset + (r)*config.cols + (c+1)]); 
         }
 
@@ -1514,7 +1512,7 @@ void montecarlo_simulation_cuda_launcher(configuration_description* config,doubl
     dim3 blocksPerGrid(num_of_blocks,1,1);
     dim3 threadsPerBlock(config->block_dim,1,1);
 
-    if(config->gpu_version != VERSION_2D_GRID  && config->gpu_version != VERSION_GRID_LINEARIZED)
+    if(config->gpu_version != VERSION_2D_GRID  && config->gpu_version != VERSION_GRID_LINEARIZED && config->gpu_version != VERSION_DYNAMIC)
     {
         init_random_state<<<blocksPerGrid,threadsPerBlock>>>(time(NULL),config->num_of_tests,states);
         cudaDeviceSynchronize();
@@ -1529,11 +1527,12 @@ void montecarlo_simulation_cuda_launcher(configuration_description* config,doubl
         CHECK_KERNELCALL();
     }else if(config->gpu_version == VERSION_DYNAMIC)
     {
-        blocksPerGrid.y = 1;
+        //blocksPerGrid.y = 1;
         threadsPerBlock.y = config->block_dim;
         init_random_state2D<<<blocksPerGrid,threadsPerBlock>>>(time(NULL),states, config->max_cores, config->num_of_tests);
         cudaDeviceSynchronize();
         CHECK_KERNELCALL();
+        threadsPerBlock.y = 1;
 
     }
     sim_state.rand_states = states;
