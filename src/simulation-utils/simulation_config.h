@@ -148,7 +148,7 @@ class Core_neighbourhood{
         right_core = DEAD;
     }
 
-    //TODO PASS THE ARRAY OF NEIGHBOURS INSTEAD OF SIM_STATE
+    //COMUNICATE TO THIS CORE NEIGHBOURS THAT IT IS DEAD
     __Host_Device__ void update_state_after_core_die(Core_neighbourhood* neighbours,configuration_description config,simulation_state sim_state){
         
         int r = my_position / config.cols;
@@ -157,16 +157,16 @@ class Core_neighbourhood{
         //CUDA_DEBUG_MSG("CORE IN [%d][%d] is dead\n",r,c);
         //Border check is not necessary since if "top/bot/left/right" is false then or core is dead or does not exist
         if(top_core){
-            neighbours[((r+1)*config.cols) + (c)].set_top_dead();
+            neighbours[((r+1)*config.cols) + (c)].set_bot_dead();   //I say to my top neighbour to set my dead
         }
         if(bot_core){
-            neighbours[((r-1)*config.cols) + (c)].set_bot_dead();
+            neighbours[((r-1)*config.cols) + (c)].set_top_dead();   //I say to my bot neighbour to set my dead
         }
         if(left_core){
-            neighbours[((r)*config.cols) + (c-1)].set_left_dead();
+            neighbours[((r)*config.cols) + (c-1)].set_right_dead(); //I say to my left neighbour to set my dead
         }
         if(right_core){
-            neighbours[((r)*config.cols) + (c+1)].set_right_dead();
+            neighbours[((r)*config.cols) + (c+1)].set_left_dead();  //I say to my right neighbour to set my dead
         }
     }
 

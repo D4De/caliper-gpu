@@ -12,6 +12,7 @@
 //THERMAL MODEL
 #include "./simulation-utils/thermal_model.h"
 
+__device__ bool _false_register_ = false;
 
 /**
  * Calculate all the temps of the cores in the grid
@@ -804,16 +805,16 @@ __global__ void montecarlo_simulation_cuda_redux_struct_optimized(simulation_sta
 
             //Top
             out_of_range = ((r - 1) < 0);
-            local_cores[threadIdx.x].top_core = out_of_range ? &false_register : &(sim_state.alives[offset + (r-1)*config.cols + c]); 
+            local_cores[threadIdx.x].top_core = out_of_range ? &_false_register_ : &(sim_state.alives[offset + (r-1)*config.cols + c]); 
             //Bot
             out_of_range = ((r + 1) > config.rows);
-            local_cores[threadIdx.x].bot_core = out_of_range ? &false_register : &(sim_state.alives[offset + (r+1)*config.cols + c]); 
+            local_cores[threadIdx.x].bot_core = out_of_range ? &_false_register_ : &(sim_state.alives[offset + (r+1)*config.cols + c]); 
             //Left
             out_of_range = ((c - 1) < 0);
-            local_cores[threadIdx.x].left_core = out_of_range ? &false_register: &(sim_state.alives[offset + (r)*config.cols + (c-1)]); 
+            local_cores[threadIdx.x].left_core = out_of_range ? &_false_register_: &(sim_state.alives[offset + (r)*config.cols + (c-1)]); 
             //Right
             out_of_range = ((c + 1) > config.cols);
-            local_cores[threadIdx.x].right_core = out_of_range ? &false_register : &(sim_state.alives[offset + (r)*config.cols + (c+1)]); 
+            local_cores[threadIdx.x].right_core = out_of_range ? &_false_register_ : &(sim_state.alives[offset + (r)*config.cols + (c+1)]); 
 
             //Write back result
             cores[index] = local_cores[threadIdx.x];
@@ -1361,7 +1362,7 @@ __global__ void montecarlo_dynamic_step(simulation_state sim_state,configuration
     }
 }
 
-__device__ bool _false_register_ = false;
+
 
 __global__ void montecarlo_simulation_cuda_dynamic(simulation_state sim_state,configuration_description config, float* TTF){
     unsigned int walk_id = threadIdx.x + blockIdx.x * blockDim.x;
@@ -1369,9 +1370,9 @@ __global__ void montecarlo_simulation_cuda_dynamic(simulation_state sim_state,co
     int offset = walk_id*config.max_cores;
 
     curandState_t *states = sim_state.rand_states;
-    TTF[walk_id] = 0.0;
     
     if(walk_id<config.num_of_tests){
+        TTF[walk_id] = 0.0;
         bool out_of_range;
         int left_cores = config.max_cores;
         core_state * cores   = sim_state.core_states;

@@ -10,7 +10,7 @@ WL=0
 #EXEC=./caliper
 EXEC=./gpu_exec
 EXTRA_ARG=-g
-VERSION=0
+VERSION=7
 BLOCKS=32
 #EXTRA_ARG=-c\ 0.95\ 0.005
 #---ARG0: OUTPUT FILE---------------
@@ -47,7 +47,7 @@ do
     #This grant that distributed load for this configuration never goes above 1
 
     MAX_CORE=`echo "scale=0; ($num_cores * $num_cores)" | bc`
-    MIN_CORE=`echo "scale=0; ($MAX_CORE)/2" | bc`
+    #MIN_CORE=`echo "scale=0; ($MAX_CORE)/2" | bc`
     WORKLOAD=`echo "scale=4; $MIN_CORE / ($num_cores * $num_cores)" | bc`
     echo "COMPUTING $MAX_CORE  with mincore = $MIN_CORE"
     echo $EXEC $num_cores $num_cores $MIN_CORE $WORKLOAD $EXTRA_ARG $VERSION $BLOCKS
@@ -63,7 +63,7 @@ do
     #$EXEC $num_cores $num_cores $MIN_CORE $(echo "scale=4; $MIN_CORE / ($num_cores * $num_cores)" | bc) $EXTRA_ARG  >> $OUTPUT_FILE 
     #USE HALF CORE AS MINCORE
     MAX_CORE=`echo "scale=0; ($num_cores * $num_cores)" | bc`
-    MIN_CORE=`echo "scale=0; ($MAX_CORE)/2" | bc`
+    #MIN_CORE=`echo "scale=0; ($MAX_CORE)/2" | bc`
     WORKLOAD=`echo "scale=4; $MIN_CORE / ($num_cores * $num_cores)" | bc`
     echo "COMPUTING $MAX_CORE  with mincore = $MIN_CORE"
     echo $EXEC $num_cores $num_cores $MIN_CORE $WORKLOAD $EXTRA_ARG $VERSION $BLOCKS
