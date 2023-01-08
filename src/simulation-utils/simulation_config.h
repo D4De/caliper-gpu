@@ -372,6 +372,7 @@ void swapStateStruct(simulation_state sim_state,int dead_index,int left_cores,in
     //CUDA_DEBUG_MSG("Swappato core: %d con core %d -> check %d\n",left_cores-1, dead_index,cores[death_i].real_index)
 }
 
+template<bool optimized>
 __device__
 void swapStateDynamic(simulation_state sim_state,int dead_index,int left_cores,int offset){
 
@@ -382,6 +383,11 @@ void swapStateDynamic(simulation_state sim_state,int dead_index,int left_cores,i
     //Get some indexes
     int last_elem   = offset + (left_cores-1);
     int death_i     = offset + (dead_index);
+
+    if(optimized){
+        cores[death_i] = cores[last_elem];
+        return;
+    }
 
     int temp = value[last_elem];
     value[last_elem] = value[death_i];

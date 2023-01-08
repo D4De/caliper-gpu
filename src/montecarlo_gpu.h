@@ -1233,7 +1233,7 @@ __device__ void tempModel_gpu_dynamic(simulation_state sim_state, configuration_
     cores[absolute_index].temp = ENV_TEMP + cores[absolute_index].load * SELF_TEMP + temp;
 }
 
-__device__ void tempModel_gpu_dynamic_opt(simulation_state sim_state, configuration_description config,int distributed_load, int core_id, int walk_id, int left_cores){
+__device__ void tempModel_gpu_dynamic_opt(simulation_state sim_state, configuration_description config,float distributed_load, int core_id, int walk_id, int left_cores){
 
     int offset = walk_id*config.max_cores;
     int absolute_index = offset + core_id;          //contain position of this core in the original grid
@@ -1298,29 +1298,13 @@ __device__ int prob_to_death_dynamic(simulation_state sim_state, configuration_d
         
         int relative_index = id_min - offset;
         
-        swapStateDynamic(sim_state,relative_index,left_cores,offset); //We give (id_min-offset) becouse the swap then use relative index
-        //sim_state.times[offset + left_cores-1] = FLT_MAX;
+        swapStateDynamic<true>(sim_state,relative_index,left_cores,offset); //We give (id_min-offset) becouse the swap then use relative index
+        sim_state.times[offset + left_cores-1] = FLT_MAX;
         sim_state.core_states[offset + left_cores-1].load = 0;
         sim_state.core_states[offset + left_cores-1].alive = DEAD;
 
         int real_index_of_dead = sim_state.core_states[offset + left_cores-1].real_index;
         sim_state.alives[real_index_of_dead + offset] = false;//Mark core as dead!!
-
-        //TODO CREATE AN ALTERNATIVE VERSION OF  THE swapStateStruct function that use walk_id*config_maxcore as offset instead of the coalesced offset
-
-        //SWAP
-        /*
-        sim_state.core_states[id_min].alive = false;
-        sim_state.core_states[id_min].load = 0.0;
-
-        core_state t1 = sim_state.core_states[id_min];
-        sim_state.core_states[id_min] = sim_state.core_states[blockDim.x + walk_id*config.max_cores];
-        sim_state.core_states[blockDim.x + walk_id*config.max_cores] = t1;
-        
-        int t2 = sim_state.core_states[id_min].real_index;
-        sim_state.core_states[id_min].real_index = sim_state.core_states[blockDim.x + walk_id*config.max_cores].real_index;
-        sim_state.core_states[blockDim.x + walk_id*config.max_cores].real_index = t2;
-        */
     }
     return id_min;
 }
@@ -1345,7 +1329,7 @@ __global__ void montecarlo_dynamic_step(simulation_state sim_state,configuration
     tempModel_gpu_dynamic_opt(sim_state, config,distributedLoad, core_id, walk_id, left_cores);                                          //Update the temperature mode
     __syncthreads();
 
-    //FIND THE MIN stepT between cores in this block (work if maxcore < 32)
+    //FIND THE MIN
     minis[core_id] = global_id;
     min = prob_to_death_dynamic(sim_state, config, walk_id, core_id, minis,left_cores);
     stepT = sim_state.times[offset]; //Times[0] of a specific walk (times is not swapped)
@@ -1382,11 +1366,13 @@ __global__ void montecarlo_simulation_cuda_dynamic(simulation_state sim_state,co
             sim_state.real_pos[index] = index;
 
             sim_state.alives[index]     = ALIVE;
+            //Initialize Core state
             cores[index].alive          = ALIVE;
             cores[index].curr_r         = 1;
             cores[index].real_index     = j;
             cores[index].load           = config.initial_work_load;
 
+            //Save neighbourhood informations
             int r = j/config.cols;    //Row position into local grid
             int c = j%config.cols;    //Col position into local grid
 
@@ -1406,7 +1392,6 @@ __global__ void montecarlo_simulation_cuda_dynamic(simulation_state sim_state,co
 
         while (left_cores >= config.min_cores) {
             //---------Launch Child kernel to calculate a random walk step for this thread
-            //WHY I CANT RUN A 2D child KERNEL????
             int block_dim = left_cores; //TODO FIND IN EFFICIENT WAY THE NEAREST POW OF 2 NEAR TO BLOCK
             int num_of_blocks = 1;// (left_cores + block_dim - 1) / block_dim;
 
