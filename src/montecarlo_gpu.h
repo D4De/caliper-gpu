@@ -735,7 +735,7 @@ __global__ void montecarlo_simulation_cuda_redux_struct(simulation_state sim_sta
         //SUM ALL THE CORE VALUES INSIDE THIS BLOCK INTO sumTTF[blockid]
         //Sync the threads
         __syncthreads();
-        CUDA_DEBUG_MSG("SUMTTF: %f\n", partial_sumTTF[0]);
+        //CUDA_DEBUG_MSG("SUMTTF: %f\n", partial_sumTTF[0]);
         //Acccumulate the results of this block
         accumulate<float>(partial_sumTTF,blockDim.x,config.num_of_tests);
 
@@ -1233,7 +1233,7 @@ __device__ void tempModel_gpu_dynamic(simulation_state sim_state, configuration_
     cores[absolute_index].temp = ENV_TEMP + cores[absolute_index].load * SELF_TEMP + temp;
 }
 
-__device__ void tempModel_gpu_dynamic_opt(simulation_state sim_state, configuration_description config,int distributed_load, int core_id, int walk_id, int left_cores){
+__device__ void tempModel_gpu_dynamic_opt(simulation_state sim_state, configuration_description config,float distributed_load, int core_id, int walk_id, int left_cores){
 
     int offset = walk_id*config.max_cores;
     int absolute_index = offset + core_id;          //contain position of this core in the original grid
@@ -1417,7 +1417,7 @@ __global__ void montecarlo_simulation_cuda_dynamic(simulation_state sim_state,co
             //CUDA_DEBUG_MSG("SUMTTF: %f\n",TTF[0]);
         }
         //END SIMULATION-----------------------------
-        CUDA_DEBUG_MSG("SUMTTF: %f\n",TTF[0]);
+        //CUDA_DEBUG_MSG("SUMTTF: %f\n",TTF[0]);
         //accumulate(TTF,config.num_of_tests,config.num_of_tests);
 
         //Add the partial result of this block to the final result
@@ -1473,7 +1473,6 @@ void montecarlo_simulation_cuda_launcher(configuration_description* config,doubl
     //----------------------------------------------------------------------
     //----CUDA variables:---------------------------------------------------
     //----------------------------------------------------------------------
-
     float *sumTTF_GPU;   //GPU result sumTTF
     float *sumTTF_GPU_final;   //GPU result sumTTF
     float *sumTTFx2_GPU; //GPU result sumTTFx2
@@ -1574,7 +1573,7 @@ void montecarlo_simulation_cuda_launcher(configuration_description* config,doubl
     //---------------------------------------------------------------------------------
     else if(config->gpu_version == VERSION_STRUCT_SHARED)
     {
-        printf("STRUCT\n");
+        //printf("STRUCT\n");
         montecarlo_simulation_cuda_redux_struct<<<blocksPerGrid,threadsPerBlock,config->block_dim*sizeof(float)>>>(sim_state,*config,sumTTF_GPU,sumTTFx2_GPU);
         CHECK_KERNELCALL();
         cudaDeviceSynchronize();
