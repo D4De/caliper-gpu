@@ -192,15 +192,21 @@ void allocate_simulation_state_on_device(simulation_state* state,configuration_d
     }
 
     //ALL OTHER VERSION
-    CHECK(cudaMalloc(&state->currR    , cells*sizeof(float)));  //CurrR
-    CHECK(cudaMalloc(&state->temps    , cells*sizeof(float)));  //temps
-    CHECK(cudaMalloc(&state->loads    , cells*sizeof(float)));  //loads
-    CHECK(cudaMalloc(&state->indexes  , cells*sizeof(int)));    //indexes
-    CHECK(cudaMalloc(&state->real_pos  , cells*sizeof(int)));    //real positions
+    if(config.gpu_version != VERSION_STRUCT_SHARED){
+        CHECK(cudaMalloc(&state->currR    , cells*sizeof(float)));  //CurrR
+        CHECK(cudaMalloc(&state->temps    , cells*sizeof(float)));  //temps
+        CHECK(cudaMalloc(&state->loads    , cells*sizeof(float)));  //loads
+    }
+    
+    
     CHECK(cudaMalloc(&state->alives   , cells*sizeof(bool)));   //alives
     CHECK(cudaMalloc(&state->times    , cells*sizeof(float)));  //times
+
     CHECK(cudaMalloc(&state->false_register, sizeof(bool)));
     
+    CHECK(cudaMalloc(&state->indexes  , cells*sizeof(int)));    //indexes
+    CHECK(cudaMalloc(&state->real_pos  , cells*sizeof(int)));   //real positions
+
     if(config.gpu_version == VERSION_COALESCED_OPTIMIZED){
         CHECK(cudaMalloc(&state->neighbour_state, cells*sizeof(Core_neighbourhood)));
     }
@@ -217,9 +223,11 @@ void free_simulation_state(simulation_state* state,configuration_description con
     }
 
     //ALL OTHER VERSIONS
-    CHECK(cudaFree(state->currR));
-    CHECK(cudaFree(state->temps));
-    CHECK(cudaFree(state->loads));
+    if(config.gpu_version != VERSION_STRUCT_SHARED){
+        CHECK(cudaFree(state->currR));
+        CHECK(cudaFree(state->temps));
+        CHECK(cudaFree(state->loads));
+    }
     CHECK(cudaFree(state->indexes));
     CHECK(cudaFree(state->alives));
     CHECK(cudaFree(state->times));

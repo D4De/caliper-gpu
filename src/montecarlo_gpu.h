@@ -621,7 +621,7 @@ __global__ void montecarlo_simulation_cuda_redux_struct(simulation_state sim_sta
     //extern __shared__ unsigned int tmp_sumTTF[];
     //extern __shared__ unsigned int tmp_sumTTFx2[]; //??? dont know if necessary
    extern __shared__ float partial_sumTTF[];
-   __shared__ core_state local_cores[256];
+   __shared__ core_state local_cores[256]; //TODO FIX THE NUMER OF CORES IN SHARED 
 
     sumTTF_res[blockIdx.x] = 0;
     partial_sumTTF[threadIdx.x] = 0;
