@@ -34,7 +34,7 @@ void montecarlo_simulation_cpu(configuration_description* config,double * sumTTF
     temps   = (float*) malloc(sizeof(float)* rows * cols);
     currR   = (float*) malloc(sizeof(float)* rows * cols);
     alives  = (bool*)  malloc(sizeof(bool)* rows * cols);
-    indexes = (int*)   malloc(sizeof(int)* rows * cols);
+    //indexes = (int*)   malloc(sizeof(int)* rows * cols);
 
     //--------------------------------------------------
     //----Confidence Intervall Setup--------------------
@@ -62,7 +62,7 @@ void montecarlo_simulation_cpu(configuration_description* config,double * sumTTF
         for (j = 0; j < config->max_cores; j++) {
             currR[j]  = 1;
             alives[j] = true;
-            indexes[j] = j;
+            //indexes[j] = j;
         }
 
     //-----------RUN CURRENT EXPERIMENT----------
@@ -73,32 +73,32 @@ void montecarlo_simulation_cpu(configuration_description* config,double * sumTTF
         //-----------Redistribute Loads among alive cores----------
             double distributedLoad = config->initial_work_load * config->max_cores / left_cores;
 
-            for (j = 0; j < left_cores; j++) {
-                int index = indexes[j];
-                loads[index] = distributedLoad;
+            for (j = 0; j < config->max_cores; j++) {
+                //int index = indexes[j];
+                if(alives[j])loads[j] = distributedLoad;
             }
-            //Set Load of lastly dead core to 0
-            loads[indexes[left_cores-1]] = 0;
 
         //-----------Compute Temperatures of each core based on loads----
-            tempModel(loads, temps,indexes,left_cores, rows, cols,0);
+            tempModel_cpu(loads, temps, rows, cols);
 	        //tempModel(loads, temps, rows, cols);
         //-----------Random Walk Step computation-------------------------
-            for (j = 0; j < left_cores; j++) {
-                    int index = indexes[j]; //Current alive core
-                    random = (double) drand48() * currR[index]; //current core will potentially die when its R will be equal to random. drand48() generates a number in the interval [0.0;1.0)
-                    double alpha = getAlpha(temps[index]);
+            for (j = 0; j < config->max_cores; j++) {
+                if(alives[j]){
+                    //int index = indexes[j]; //Current alive core
+                    random = (double) drand48() * currR[j]; //current core will potentially die when its R will be equal to random. drand48() generates a number in the interval [0.0;1.0)
+                    double alpha = getAlpha(temps[j]);
                     t = alpha * pow(-log(random), (double) 1 / BETA); //elapsed time from 0 to obtain the new R value equal to random
-                    eqT = alpha * pow(-log(currR[index]), (double) 1 / BETA); //elapsed time from 0 to obtain the previous R value
+                    eqT = alpha * pow(-log(currR[j]), (double) 1 / BETA); //elapsed time from 0 to obtain the previous R value
                     t = t - eqT;
                     
                     //the difference between the two values represents the time elapsed from the previous failure to the current failure
                     //(we will sum to the total time the minimum of such values)
                     
                     if (minIndex == -1 || (minIndex != -1 && t < stepT)) {
-                        minIndex = index;//Set new minimum index
+                        minIndex = j;//Set new minimum index
                         stepT = t;   //set new minimum time as timeStep
                     } //TODO ADD A CHECK ON MULTIPLE FAILURE IN THE SAME INSTANT OF TIME.
+                }
             }
         //-------Check if No failed core founded-----------
             if (minIndex == -1) {
@@ -117,16 +117,22 @@ void montecarlo_simulation_cpu(configuration_description* config,double * sumTTF
         //---------UPDATE Configuration----------------- 
             if (left_cores > config->min_cores) {
                 alives[minIndex] = false;
-                swap_core_index(indexes,minIndex,left_cores,0);
+                loads[minIndex]  = 0;
+                //swap_core_index(indexes,minIndex,left_cores,0);
                 // compute remaining reliability for working cores
-                for (j = 0; j < left_cores; j++) {
-                    int index = indexes[j];
-                    		double alpha = getAlpha(temps[index]);
-                            eqT = alpha * pow(-log(currR[index]), (double) 1 / BETA); //TODO: fixed a buf. we have to use the eqT of the current unit and not the one of the failed unit
-                            currR[index] = exp(-pow((stepT + eqT) / alpha, BETA));
+                
+                for (j = 0; j < config->max_cores; j++) {
+                    if(alives[j]){
+                        //int index = indexes[j];
+                        double alpha = getAlpha(temps[j]);
+                        eqT = alpha * pow(-log(currR[j]), (double) 1 / BETA); //TODO: fixed a buf. we have to use the eqT of the current unit and not the one of the failed unit
+                        currR[j] = exp(-pow((stepT + eqT) / alpha, BETA));
+                    }
                 }
             }
             left_cores--;
+            //Set Load of lastly dead core to 0
+            //loads[indexes[left_cores-1]] = 0;
             
         }
     //---------UPDATE Stats----------------- 

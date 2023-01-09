@@ -40,17 +40,19 @@ echo "ROWS,COLS,NUM OF CORES,MIN_CORE,WORKLOAD,NUM_OF_TEST,CONFIDENCE,EXECUTION 
 
 #$MIN_CORE = $(echo "ciao")
 
-
-for num_cores in 4 35 37 40 42 43 44 45
-do
-    #Set workload to $MIN_CORE / ($num_cores * $num_cores) 
-    #This grant that distributed load for this configuration never goes above 1
-
-    MAX_CORE=`echo "scale=0; ($num_cores * $num_cores)" | bc`
+#Set workload to $MIN_CORE / ($num_cores * $num_cores) 
+#This grant that distributed load for this configuration never goes above 1
+execute_caliper(){
+    #num_cores = $1
+    MAX_CORE=`echo "scale=0; ($1 * $1)" | bc`
     MIN_CORE=`echo "scale=0; ($MAX_CORE)/2" | bc`
-    WORKLOAD=`echo "scale=4; $MIN_CORE / ($num_cores * $num_cores)" | bc`
+    WORKLOAD=`echo "scale=4; $MIN_CORE / ($1 * $1)" | bc`
     echo "COMPUTING $MAX_CORE  with mincore = $MIN_CORE"
-    echo $EXEC $num_cores $num_cores $MIN_CORE $WORKLOAD $EXTRA_ARG $VERSION $BLOCKS
-    $EXEC $num_cores $num_cores $MIN_CORE $WORKLOAD $EXTRA_ARG $VERSION $BLOCKS>> $OUTPUT_FILE 
+    echo $EXEC $1 $1 $MIN_CORE $WORKLOAD $EXTRA_ARG $VERSION $BLOCKS
+    $EXEC $1 $1 $MIN_CORE $WORKLOAD $EXTRA_ARG $VERSION $BLOCKS>> $OUTPUT_FILE 
+}
 
+for num_cores in 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 22 24 26 28 30 32 34 36 38 40 42 44 45
+do
+    execute_caliper "$num_cores"
 done

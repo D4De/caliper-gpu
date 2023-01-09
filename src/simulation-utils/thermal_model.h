@@ -32,9 +32,10 @@
 #ifdef CUDA
 __device__ __host__ 
 #endif
-void tempModel(double *loads, double* temps, int rows, int cols) {
-    double temp;
+void tempModel_cpu(float *loads, float* temps, int rows, int cols) {
+    float temp;
     int i, j, k, h;
+    
     for (i = 0; i < rows; i++)
         for (j = 0; j < cols; j++) {
             for (k = -1, temp = 0; k < 2; k++)
@@ -85,7 +86,8 @@ void tempModel(float *loads, float* temps,int* indexes,int left_alive, int rows,
             for (h = -1; h < 2; h++)
             {
                 if ((k != 0 || h != 0) && k != h && k != -h && r + k >= 0 && r + k < rows && c + h >= 0 && c + h < cols){
-                    temp += loads[offset+(r + k)*cols + (c + h)] * NEIGH_TEMP;
+                    int idx = indexes[offset+(r + k)*cols + (c + h)];
+                    temp += loads[idx] * NEIGH_TEMP;
                     //int ld = (r + k)*cols + (c + h) < left_alive ? distributed_load : 0;
                 }
             }
