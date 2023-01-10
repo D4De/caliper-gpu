@@ -7,9 +7,9 @@
 OUTPUT_FILE=./statistics/test.csv
 MIN_CORE=6
 WL=0
-#EXEC=./caliper
-EXEC=./gpu_exec
-EXTRA_ARG=-g
+EXEC=./caliper
+#EXEC=./gpu_exec
+EXTRA_ARG=-x
 VERSION=2
 BLOCKS=256
 #EXTRA_ARG=-c\ 0.95\ 0.005
@@ -52,7 +52,8 @@ execute_caliper(){
     $EXEC $1 $1 $MIN_CORE $WORKLOAD $EXTRA_ARG $VERSION $BLOCKS>> $OUTPUT_FILE 
 }
 
-for num_cores in 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 22 24 26 28 30 32 34 36 38 40 42 44 45
+#for num_cores in 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 22 24 26 28 30 32 34 36 38 40 42 44 45
+for num_cores in 4 28 30 32 34 36 38 40 42 44 45
 do
     execute_caliper "$num_cores"
 done
