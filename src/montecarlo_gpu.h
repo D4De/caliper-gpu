@@ -1635,7 +1635,7 @@ void montecarlo_simulation_cuda_launcher(configuration_description* config,doubl
     else if(config->gpu_version == VERSION_GRID_LINEARIZED)
     {
         printf("GRID LINEARIZED\n");
-        config->block_dim   = 256;
+        config->block_dim   = 1024;
         num_of_blocks       = config->num_of_tests;
 
         CHECK(cudaMalloc(&sumTTF_GPU    , num_of_blocks*sizeof(float)));   //Allocate Result memory
