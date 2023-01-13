@@ -269,13 +269,8 @@ __device__  int getIndex(int i, int N){
 
     return tid + N*i; //Get the position of this thread inside the array for "CORE i in the grid"
 }
-<<<<<<< HEAD
-
-#define GETINDEX(i,tid,N)  (tid + N*(i))
-=======
 #define GETINDEX(i,tid,N)  (tid + N*(i))
 
->>>>>>> 14cde5bced310efd32c9ad9f603b352999d7692c
 #endif
 
 //----------------------------------------------------------------------------------------------
@@ -299,49 +294,11 @@ void swapState(simulation_state sim_state,int dead_index,int left_cores,int num_
 {
     unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
 
-<<<<<<< HEAD
-void swapState(simulation_state sim_state,int dead_index,int left_cores,int max_cores){
-
-    //Get absolute indexes from relative one
-    int last_elem   = getIndex(left_cores-1,max_cores);
-    int idxToSwap   = getIndex(dead_index,max_cores);
-
-    //Save the Alive core at the end of the list into a tmp val  (COALESCED)
-    int tmp_currR = sim_state.currR[last_elem];
-    int tmp_loads = sim_state.loads[last_elem];
-    int tmp_temps = sim_state.temps[last_elem];
-
-    //Swap dead index to end      (COALESCED WRITE, NON COALESCED READ)
-    sim_state.currR[last_elem] = sim_state.currR[idxToSwap];
-    sim_state.loads[last_elem] = sim_state.loads[idxToSwap];
-    sim_state.temps[last_elem] = sim_state.temps[idxToSwap];
-    sim_state.indexes[last_elem] = dead_index; //Save his original position of alive core swapped
-
-    //Put Alive core at dead position (NOT COALESCED)
-    sim_state.currR[dead_index] = tmp_currR;
-    sim_state.loads[dead_index] = tmp_loads;
-    sim_state.temps[dead_index] = tmp_temps;
-    sim_state.indexes[dead_index] = left_cores-1; //Save original position of dead core swapped
-}
-
-__device__
-void swapStateStruct(simulation_state sim_state,int dead_index,int left_cores,int num_of_tests){
-    unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
-
-=======
->>>>>>> 14cde5bced310efd32c9ad9f603b352999d7692c
     int* index = sim_state.indexes;
     int* value = sim_state.real_pos;
     core_state* cores = sim_state.core_states;
 
     //Get some indexes
-<<<<<<< HEAD
-    //int last_elem        = getIndex(left_cores-1,num_of_tests); // Last elem alive
-    //int death_i          = getIndex(dead_index,num_of_tests);   // current core to die
-    
-    int last_elem   = GETINDEX((left_cores-1),tid,num_of_tests);
-    int death_i     = GETINDEX(dead_index,tid,num_of_tests);
-=======
     int last_elem   = GETINDEX((left_cores-1),tid,num_of_tests);
     int death_i     = GETINDEX(dead_index,tid,num_of_tests);
     
@@ -410,7 +367,6 @@ void swapStateStruct(simulation_state sim_state,int dead_index,int left_cores,in
         cores[death_i] = cores[last_elem];
         return;
     }
->>>>>>> 14cde5bced310efd32c9ad9f603b352999d7692c
 
     int temp = value[last_elem];
     value[last_elem] = value[death_i];
@@ -424,42 +380,16 @@ void swapStateStruct(simulation_state sim_state,int dead_index,int left_cores,in
     index[value[last_elem]] = index[value[death_i]];
     index[value[death_i]] = temp;
 
-<<<<<<< HEAD
-     //CUDA_DEBUG_MSG("Swappato core: %d con core %d -> check %d\n",left_cores-1, dead_index,cores[death_i].real_index)
-}
-
-
-__device__
-void swapStateStructOptimized(simulation_state sim_state,int dead_index,int left_cores,int num_of_tests){
-    unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
-=======
     //CUDA_DEBUG_MSG("Swappato core: %d con core %d -> check %d\n",left_cores-1, dead_index,cores[death_i].real_index)
 }
 
 template<bool optimized>
 __device__
 void swapStateDynamic(simulation_state sim_state,int dead_index,int left_cores,int offset){
->>>>>>> 14cde5bced310efd32c9ad9f603b352999d7692c
 
     int* index = sim_state.indexes;
     int* value = sim_state.real_pos;
     core_state* cores = sim_state.core_states;
-<<<<<<< HEAD
-
-    //Get some indexes
-    //int last_elem        = getIndex(left_cores-1,num_of_tests); // Last elem alive
-    //int death_i          = getIndex(dead_index,num_of_tests);   // current core to die
-    
-    int last_elem   = GETINDEX((left_cores-1),tid,num_of_tests);
-    int death_i     = GETINDEX(dead_index,tid,num_of_tests);
-
-    cores[death_i] = cores[last_elem];
-}
-__device__ 
-void swapStateStruct1(simulation_state sim_state,int dead_index,int left_cores,int max_cores){
-    int* indexes = sim_state.indexes;
-=======
->>>>>>> 14cde5bced310efd32c9ad9f603b352999d7692c
 
     //Get some indexes
     int last_elem   = offset + (left_cores-1);
