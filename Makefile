@@ -32,8 +32,8 @@ FLAGS =
 #GPU CAPABILITY: the capability is a version number composed like X.X (eg 5.0 or 6.1 )
 #You can find capability of device on https://developer.nvidia.com/cuda-gpus#compute
 #IN THE FOLLOWING FIELD REPLACE 50 with your GPU capability without the "." so X.X become XX
-#eg: 5.0 -> 50 , 6.1->60 , 7.5 -> 75
-CAPABILITY = 50
+#eg: 5.0 -> 50 , 6.1->60 , 7.5 -> 75 (37 for aws)
+CAPABILITY = 37
 #THE CODE IS EQUAL TO THE ARCHITECTURE CAPABILITY SO MY IS 5.0 so sm_50 and compute_50
 #GENERATING ARCHITECTURE FLAGS--------------- TODO AUTOMATIZE
 CODE = code=sm_$(CAPABILITY)
@@ -52,7 +52,7 @@ all: clean cpu gpu
 #gpu: $(CALIPER_GPU_EX)
 cpu: $(CALIPER_CPU_EX)
 gpu:
-	nvcc -g -m64 -gencode $(ARCHITECTURE_FLAG) --expt-relaxed-constexpr --generate-line-info -rdc=true -lcudadevrt  ./src/caliper_gpu.cu -o gpu_exec 
+	nvcc -g -m64 -gencode $(ARCHITECTURE_FLAG) --expt-relaxed-constexpr -rdc=true -lcudadevrt  ./src/caliper_gpu.cu -o gpu_exec 
 
 gpu-debug:
 	export CUDA_DEBUGGER_SOFTWARE_PREEMPTION=1

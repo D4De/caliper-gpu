@@ -80,6 +80,8 @@ int main(int argc, char* argv[]) {
     //when using the confidence interval, we want to execute at least MIN_NUM_OF_TRIALS
     timer.start();
     montecarlo_simulation_cpu(&config,&sumTTF,&sumTTFX2);
+    //montecarlo_simulation_cpu_pointer(&config,&sumTTF,&sumTTFX2);
+    //montecarlo_simulation_cpu_optimized(&config,&sumTTF,&sumTTFX2);
     timer.stop();
    
     

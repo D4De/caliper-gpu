@@ -6,16 +6,10 @@
             "type": "cuda-gdb",
             "request": "launch",
             "gdb": "cuda-gdb",
+            "breakOnLaunch":true,
             "program": "${workspaceFolder}/gpu_exec",
-            "arguments": "4 4 6 0.375 -g 2",
+            "arguments": "4 4 6 0.375 -g 5",
             "envFile": "${workspaceFolder}/.vscode/.env"
         },
-        {
-            "name": "CUDA C++: Launch",
-            "type": "cuda-gdb",
-            "request": "launch",
-            "program": "${workspaceFolder}/gpu_exec",
-            "envFile": "${workspaceFolder}/.vscode/.env"
-        }
     ]
 }//"preLaunchTask": "BUILD-CUDA-DEBUG",
