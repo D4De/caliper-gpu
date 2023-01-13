@@ -1,0 +1,6 @@
+ROWS,COLS,NUM OF CORES,MIN_CORE,WORKLOAD,NUM_OF_TEST,CONFIDENCE,EXECUTION TIME,MTTF[Hours],MTTF[Years]
+38,38,1444,722,0.5,100000,-nan,939.8660541,96679.04512,11.03642068
+40,40,1600,800,0.5,100000,-nan,1312.789202,96608.34816,11.02835025
+out of memory in ./src/./simulation-utils/simulation_config.h at line 208
+out of memory in ./src/./simulation-utils/simulation_config.h at line 203
+out of memory in ./src/./simulation-utils/simulation_config.h at line 203

@@ -7,11 +7,11 @@
 OUTPUT_FILE=./statistics/test.csv
 MIN_CORE=6
 WL=0
-EXEC=./caliper
-#EXEC=./gpu_exec
-EXTRA_ARG=-x
+#EXEC=./caliper
+EXEC=./gpu_exec
+EXTRA_ARG=-g
 VERSION=2
-BLOCKS=256
+BLOCKS=32
 #EXTRA_ARG=-c\ 0.95\ 0.005
 #---ARG0: OUTPUT FILE---------------
 if [ -z "$1" ]
@@ -53,7 +53,7 @@ execute_caliper(){
 }
 
 #for num_cores in 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 22 24 26 28 30 32 34 36 38 40 42 44 45
-for num_cores in 4 28 30 32 34 36 38 40 42 44 45
+for num_cores in 4 38 40 42 44 45
 do
     execute_caliper "$num_cores"
 done
