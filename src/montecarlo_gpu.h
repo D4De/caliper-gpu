@@ -1503,23 +1503,17 @@ void montecarlo_simulation_cuda_launcher(configuration_description* config,doubl
         cudaDeviceSynchronize();
         CHECK_KERNELCALL();
 
-    }else if(config->gpu_version == VERSION_2D_GRID)
+    }else if(config->gpu_version == VERSION_2D_GRID || config->gpu_version == VERSION_DYNAMIC)
     {
         blocksPerGrid.y = num_of_blocks2D;
         threadsPerBlock.y = config->block_dim;
         init_random_state2D<<<blocksPerGrid,threadsPerBlock>>>(time(NULL),states, config->max_cores, config->num_of_tests);
         cudaDeviceSynchronize();
         CHECK_KERNELCALL();
-    }else if(config->gpu_version == VERSION_DYNAMIC)
-    {
-        //blocksPerGrid.y = 1;
-        threadsPerBlock.y = config->block_dim;
-        init_random_state2D<<<blocksPerGrid,threadsPerBlock>>>(time(NULL),states, config->max_cores, config->num_of_tests);
-        cudaDeviceSynchronize();
-        CHECK_KERNELCALL();
-        threadsPerBlock.y = 1;
 
+        if(config->gpu_version == VERSION_DYNAMIC) threadsPerBlock.y = 1;
     }
+
     sim_state.rand_states = states;
 
     //----------------------------------------------------------------------
