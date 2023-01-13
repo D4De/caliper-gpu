@@ -14,12 +14,20 @@
 - 2D Grid Linearized
 - 2D Grid Dynamic programming
 
+Metrics list:
+https://gist.github.com/mrprajesh/352cbe661ee27a6b4627ae72d89479e6
+
+nvprof --metrics
+
 ## Benchmarks:
 ### DONE:
-- Redux (4 -> 43) (manca 44, 45)
-### TODO:
+(REDO 34 36 on redux and coalesced)
+- Cpu dummy
+- Redux
 - Coalesced
 - Struct
+
+### TODO:
 - Coalesced opt
 - Struct opt
 - 2D grid
