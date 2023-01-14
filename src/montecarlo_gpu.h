@@ -1516,18 +1516,7 @@ void montecarlo_simulation_cuda_launcher(configuration_description* config,doubl
             blocksPerGrid.y = 1;
         }
     }
-    /*
-    else if(config->gpu_version == VERSION_DYNAMIC)
-    {
-        //blocksPerGrid.y = 1;
-        threadsPerBlock.y = config->block_dim;
-        init_random_state2D<<<blocksPerGrid,threadsPerBlock>>>(time(NULL),states, config->max_cores, config->num_of_tests);
-        cudaDeviceSynchronize();
-        CHECK_KERNELCALL();
-        threadsPerBlock.y = 1;
-
-    }
-    */
+    
     sim_state.rand_states = states;
 
     //----------------------------------------------------------------------
@@ -1643,7 +1632,7 @@ void montecarlo_simulation_cuda_launcher(configuration_description* config,doubl
     else if(config->gpu_version == VERSION_GRID_LINEARIZED)
     {
         printf("GRID LINEARIZED\n");
-        config->block_dim   = 256;
+        config->block_dim   = 1024;
         num_of_blocks       = config->num_of_tests;
 
         CHECK(cudaMalloc(&sumTTF_GPU    , num_of_blocks*sizeof(float)));   //Allocate Result memory
