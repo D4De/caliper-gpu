@@ -802,6 +802,7 @@ __global__ void montecarlo_simulation_cuda_redux_struct_optimized(simulation_sta
 
             local_cores[threadIdx.x].curr_r      = 1;
             local_cores[threadIdx.x].real_index  = j;
+            
 
             //Top
             out_of_range = ((r - 1) < 0);
@@ -1284,6 +1285,7 @@ __device__ int prob_to_death_dynamic(simulation_state sim_state, configuration_d
     //Find most probable core to die
     sim_state.times[global_id]= t - eqT;
 
+
     //if(walk_id == 0 ) printf("TIME[%d]: %f\n",global_id,sim_state.times[global_id]);
     __syncthreads();
     
@@ -1299,7 +1301,7 @@ __device__ int prob_to_death_dynamic(simulation_state sim_state, configuration_d
         int relative_index = id_min - offset;
         
         swapStateDynamic<true>(sim_state,relative_index,left_cores,offset); //We give (id_min-offset) becouse the swap then use relative index
-        sim_state.times[offset + left_cores-1] = FLT_MAX;
+        //sim_state.times[offset + left_cores-1] = FLT_MAX;
         sim_state.core_states[offset + left_cores-1].load = 0;
         sim_state.core_states[offset + left_cores-1].alive = DEAD;
 
@@ -1375,7 +1377,6 @@ __global__ void montecarlo_simulation_cuda_dynamic(simulation_state sim_state,co
             //Save neighbourhood informations
             int r = j/config.cols;    //Row position into local grid
             int c = j%config.cols;    //Col position into local grid
-
             //Top
             out_of_range = ((r - 1) < 0);
             cores[index].top_core = out_of_range ? &_false_register_ : &(sim_state.alives[offset + (r-1)*config.cols + c]); 
@@ -1503,14 +1504,20 @@ void montecarlo_simulation_cuda_launcher(configuration_description* config,doubl
         cudaDeviceSynchronize();
         CHECK_KERNELCALL();
 
-    }else if(config->gpu_version == VERSION_2D_GRID)
+    }else if(config->gpu_version == VERSION_2D_GRID || config->gpu_version == VERSION_DYNAMIC)
     {
         blocksPerGrid.y = num_of_blocks2D;
         threadsPerBlock.y = config->block_dim;
         init_random_state2D<<<blocksPerGrid,threadsPerBlock>>>(time(NULL),states, config->max_cores, config->num_of_tests);
         cudaDeviceSynchronize();
         CHECK_KERNELCALL();
-    }else if(config->gpu_version == VERSION_DYNAMIC)
+        if(config->gpu_version == VERSION_DYNAMIC){
+            threadsPerBlock.y = 1;
+            blocksPerGrid.y = 1;
+        }
+    }
+    /*
+    else if(config->gpu_version == VERSION_DYNAMIC)
     {
         //blocksPerGrid.y = 1;
         threadsPerBlock.y = config->block_dim;
@@ -1520,6 +1527,7 @@ void montecarlo_simulation_cuda_launcher(configuration_description* config,doubl
         threadsPerBlock.y = 1;
 
     }
+    */
     sim_state.rand_states = states;
 
     //----------------------------------------------------------------------
