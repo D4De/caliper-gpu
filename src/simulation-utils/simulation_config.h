@@ -631,11 +631,15 @@ void swapStateDynamic(simulation_state sim_state,int dead_index,int left_cores,i
     int last_elem   = offset + (left_cores-1);
     int death_i     = offset + (dead_index);
 
+    
     if(optimized){
-        cores[death_i] = cores[last_elem];
+        core_state t_core = cores[last_elem];
+        cores[last_elem] = cores[death_i];
+        cores[death_i] = t_core;
+        //cores[death_i] = cores[last_elem];
         return;
     }
-
+    
     int temp = value[last_elem];
     value[last_elem] = value[death_i];
     value[death_i] = temp;
