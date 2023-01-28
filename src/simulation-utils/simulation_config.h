@@ -175,9 +175,244 @@ class Core_neighbourhood{
     }
 };
 
+struct n{
+    bool top_core;
+    bool bot_core;
+    bool right_core;
+    bool left_core;
+};
+
+class Core_neighbourhood_v2;
+class Core_neighbourhood_v3;
+__global__  void initialize_neighbourhood(bool * t, bool * b, bool * l, bool * r, Core_neighbourhood_v2 * neighbours);
+__global__  void initialize_neighbourhood_v3(n* ne, Core_neighbourhood_v3 * neighbours);
 
 
 
+
+//template <bool mode> //0 no struct 1 struct
+class Core_neighbourhood_v2{
+
+    public:
+    bool * top_cores;
+    bool * bot_cores;
+    bool * right_cores;
+    bool * left_cores;
+
+
+    Core_neighbourhood_v2(){}
+
+
+
+    //Build a Core_neighbourhood on CPU but copy it on GPU
+    static Core_neighbourhood_v2* factory_neighbours(int cells){
+        Core_neighbourhood_v2* cpu_copy = new Core_neighbourhood_v2(); 
+
+        Core_neighbourhood_v2* cuda_version; 
+
+        CHECK(cudaMalloc(&cuda_version    , sizeof(Core_neighbourhood_v2)));
+
+            CHECK(cudaMalloc(&cpu_copy->top_cores    , cells*sizeof(float)));  //Top Cores
+            CHECK(cudaMalloc(&cpu_copy->bot_cores    , cells*sizeof(float)));  //Bot Cores
+            CHECK(cudaMalloc(&cpu_copy->right_cores   , cells*sizeof(float)));  //Right Cores
+            CHECK(cudaMalloc(&cpu_copy->left_cores    , cells*sizeof(float)));  //Left Cores
+
+        
+        initialize_neighbourhood<<<1,1>>>(cpu_copy->top_cores,cpu_copy->bot_cores,cpu_copy->right_cores,cpu_copy->left_cores,cuda_version);
+        CHECK_KERNELCALL(); 
+        cudaDeviceSynchronize();
+        //CHECK(cudaMemcpy(cuda_version, cpu_copy, sizeof(Core_neighbourhood_v2), cudaMemcpyHostToDevice));  
+
+        return cuda_version;
+    }
+
+    __device__ void initialize_core(configuration_description config,int index,int offset){
+        int r = index / config.cols;
+        int c = index % config.cols;
+
+        int idx = index + offset;
+        bool out_of_range = false;
+
+        //bot_cores[index] = DEAD;
+        //Top
+        out_of_range = ((r - 1) < 0);
+        top_cores[idx] = out_of_range ? DEAD : ALIVE; 
+        //Bot
+        out_of_range = ((r + 1) >= config.rows);
+        bot_cores[idx] = out_of_range ? DEAD : ALIVE; 
+        //Left
+        out_of_range = ((c - 1) < 0);
+        left_cores[idx] = out_of_range ? DEAD : ALIVE; 
+        //Right
+        out_of_range = ((c + 1) >= config.cols);
+        right_cores[idx] = out_of_range ? DEAD : ALIVE; 
+    }
+
+    __device__ void notify_core_death(configuration_description config,int index,int offset){
+        int r = index / config.cols;
+        int c = index % config.cols;
+
+        int idx = index + offset;
+        //(me)in example is the core dead
+        if(top_cores[idx]){//If my top is alive, set his bot (me) as dead
+            bot_cores[offset + ((r-1)*config.cols) + (c)] = DEAD;
+        }
+
+        if(bot_cores[idx]){
+            top_cores[offset + ((r+1)*config.cols) + (c)] = DEAD;
+        }
+
+
+        if(left_cores[idx]){
+            right_cores[offset + ((r)*config.cols) + (c-1)] = DEAD;
+        }
+
+        if(right_cores[idx]){
+            left_cores[offset + ((r)*config.cols) + (c+1)] = DEAD;
+        }
+
+    }
+
+    __device__ float computeTemp(int idx,float NEIGH_TEMP,float distributed_load){
+
+        //TODO, use a struct instead of 4 arrays for more coalesed load accesses
+        float temp = 0;
+        temp +=  top_cores[idx] * distributed_load * NEIGH_TEMP; 
+         //BOTTOM
+        temp +=  bot_cores[idx] * distributed_load * NEIGH_TEMP; 
+         //LEFT
+        temp +=  left_cores[idx] * distributed_load * NEIGH_TEMP; 
+         //RIGHT
+        temp +=  right_cores[idx] * distributed_load * NEIGH_TEMP; 
+
+        return temp;
+    }
+
+
+};
+
+
+
+class Core_neighbourhood_v3{
+
+    public:
+    n* neighbours_state;
+
+
+    Core_neighbourhood_v3(){}
+
+
+
+    //Build a Core_neighbourhood on CPU but copy it on GPU
+    static Core_neighbourhood_v3* factory_neighbours(int cells){
+        Core_neighbourhood_v3* cpu_copy = new Core_neighbourhood_v3(); 
+
+        Core_neighbourhood_v3* cuda_version; 
+
+        CHECK(cudaMalloc(&cuda_version    , sizeof(Core_neighbourhood_v3)));
+
+        CHECK(cudaMalloc(&cpu_copy->neighbours_state    , cells*sizeof(n)));  //Top Cores
+
+        
+        initialize_neighbourhood_v3<<<1,1>>>(cpu_copy->neighbours_state,cuda_version);
+        CHECK_KERNELCALL(); 
+        cudaDeviceSynchronize();
+        //CHECK(cudaMemcpy(cuda_version, cpu_copy, sizeof(Core_neighbourhood_v2), cudaMemcpyHostToDevice));  
+
+        return cuda_version;
+    }
+
+    __device__ void initialize_core(configuration_description config,int index,int offset){
+        int r = index / config.cols;
+        int c = index % config.cols;
+
+        int idx = index + offset;
+        bool out_of_range = false;
+
+        //bot_cores[index] = DEAD;
+        //Top
+
+        n tmp;
+
+        out_of_range = ((r - 1) < 0);
+        tmp.top_core = out_of_range ? DEAD : ALIVE; 
+        //Bot
+        out_of_range = ((r + 1) >= config.rows);
+        tmp.bot_core = out_of_range ? DEAD : ALIVE; 
+        //Left
+        out_of_range = ((c - 1) < 0);
+        tmp.left_core = out_of_range ? DEAD : ALIVE; 
+        //Right
+        out_of_range = ((c + 1) >= config.cols);
+        tmp.right_core = out_of_range ? DEAD : ALIVE; 
+
+        neighbours_state[idx] = tmp;
+
+    }
+
+    __device__ void notify_core_death(configuration_description config,int index,int offset){
+        int r = index / config.cols;
+        int c = index % config.cols;
+
+        int idx = index + offset;
+
+        n tmp = neighbours_state[idx];
+        //(me)in example is the core dead
+        if(tmp.top_core){//If my top is alive, set his bot (me) as dead
+            neighbours_state[offset + ((r-1)*config.cols) + (c)].bot_core = DEAD;
+        }
+
+        if(tmp.bot_core){
+            neighbours_state[offset + ((r+1)*config.cols) + (c)].top_core = DEAD;
+        }
+
+        if(tmp.left_core){
+            neighbours_state[offset + ((r)*config.cols) + (c-1)].right_core = DEAD;
+        }
+
+        if(tmp.right_core){
+            neighbours_state[offset + ((r)*config.cols) + (c+1)].left_core = DEAD;
+        }
+
+    }
+
+    __device__ float computeTemp(int idx,float NEIGH_TEMP,float distributed_load){
+
+        //TODO, use a struct instead of 4 arrays for more coalesed load accesses
+
+        n tmp = neighbours_state[idx];
+
+        float temp = 0;
+        temp +=  tmp.top_core * distributed_load * NEIGH_TEMP; 
+         //BOTTOM
+        temp +=  tmp.bot_core * distributed_load * NEIGH_TEMP; 
+         //LEFT
+        temp +=  tmp.left_core * distributed_load * NEIGH_TEMP; 
+         //RIGHT
+        temp +=  tmp.right_core * distributed_load * NEIGH_TEMP; 
+
+        return temp;
+    }
+
+
+};
+
+//template <bool mode> //0 no struct 1 struct
+__global__  void initialize_neighbourhood(bool * t, bool * b, bool * l, bool * r, Core_neighbourhood_v2 * neighbours){
+    printf("INITIALIZED NEIGHBOURS\n");
+
+        neighbours->top_cores = t;
+        neighbours->bot_cores = b;
+        neighbours->right_cores = r;
+        neighbours->left_cores = l;
+
+
+}
+
+__global__  void initialize_neighbourhood_v3(n* ne, Core_neighbourhood_v3 * neighbours){
+    printf("INITIALIZED NEIGHBOURS\n");
+    neighbours->neighbours_state = ne;
+}
 
 /**
  * Allocate Global Memory of gpu to store the simulation state
@@ -345,9 +580,10 @@ void swapStateOptimized (simulation_state sim_state,int dead_index,int left_core
     int death_i     = GETINDEX(dead_index,tid,num_of_tests);
 
     //Swap dead index to end      (COALESCED WRITE, NON COALESCED READ)
-    sim_state.currR[last_elem] = sim_state.currR[death_i];
-    sim_state.loads[last_elem] = sim_state.loads[death_i];
-    sim_state.temps[last_elem] = sim_state.temps[death_i];
+    sim_state.currR[last_elem]      = sim_state.currR[death_i];
+    sim_state.loads[last_elem]      = sim_state.loads[death_i];
+    sim_state.temps[last_elem]      = sim_state.temps[death_i];
+    sim_state.indexes[last_elem]    = sim_state.indexes[death_i];
 
 }
 template<bool optimized>
