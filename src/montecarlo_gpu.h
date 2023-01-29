@@ -146,6 +146,34 @@ __device__ void tempModel_gpu_coalesced_optimized(Core_neighbourhood* neightbour
 
 }
 
+template <class T>
+__device__ void tempModel_gpu_coalesced_optimized_v2(T* neightbours,simulation_state sim_state, configuration_description config,float distributed_load,int left_alive){
+    int tid = threadIdx.x + blockDim.x*blockIdx.x;
+    int offset = tid * (config.rows * config.cols);
+
+    int max_cores = config.max_cores;
+
+    float* loads   = sim_state.loads;
+    float* temps   = sim_state.temps;
+
+    for(int i=0;i<left_alive;i++){
+        int absolute_index = getIndex(i,config.num_of_tests);          //contain position of this core in the original grid
+        int relative_index = sim_state.indexes[absolute_index]; //local position (usefull only on gpu global memory,for cpu is same as absolute)
+
+        int r = relative_index/config.cols;    //Row position into local grid
+        int c = relative_index%config.cols;    //Col position into local grid
+
+        float temp = 0;
+        int k,h;
+        //CUDA_DEBUG_MSG("Core index = [%d,%d,%d]\n",23,getIndex(i,config.num_of_tests),33);
+        int idx = relative_index + offset;
+
+        temp = neightbours->computeTemp(idx,NEIGH_TEMP,distributed_load);
+
+        temps[absolute_index] = ENV_TEMP + distributed_load * SELF_TEMP + temp;
+    }
+
+}
 
 __device__ void tempModel_gpu_grid(simulation_state sim_state, configuration_description config, int core_id, int walk_id){
 
@@ -604,6 +632,122 @@ __global__ void montecarlo_simulation_cuda_redux_coalesced(simulation_state sim_
     }
 }
 
+template <class T>
+__global__ void montecarlo_simulation_cuda_redux_coalesced_opt(simulation_state sim_state,configuration_description config ,T* neighbours,float * sumTTF_res,float * sumTTFx2_res){
+    curandState_t *states = sim_state.rand_states;
+    unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    int offset = tid * (config.rows * config.cols);
+    
+    //extern __shared__ unsigned int tmp_sumTTF[];
+    //extern __shared__ unsigned int tmp_sumTTFx2[]; //??? dont know if necessary
+    extern __shared__ float partial_sumTTF[];
+
+    sumTTF_res[blockIdx.x] = 0;
+    partial_sumTTF[threadIdx.x] = 0;
+    
+    if(tid<config.num_of_tests){
+        double random;
+        int left_cores;
+        double stepT;
+        int minIndex;
+        int actualMinIndex;
+        double totalTime;
+        int j;
+        double t, eqT;
+
+        float* currR   = sim_state.currR;
+        float* loads   = sim_state.loads;
+        float* temps   = sim_state.temps;
+        int*   indexes = sim_state.indexes;
+
+        left_cores = config.max_cores;
+        totalTime = 0;
+        minIndex = 0;
+
+        for (j = 0; j < config.max_cores; j++) { //Also parallelizable (dont know if usefull, only for big N)
+            int index = GETINDEX(j,tid,config.num_of_tests);
+
+            indexes[index]  = j;
+            currR[index]    = 1;
+            neighbours->initialize_core(config,j,offset);
+        }
+
+        while (left_cores >= config.min_cores) {
+            minIndex = -1;
+
+            //-----------Redistribute Loads among alive cores----------
+            double distributedLoad = (double)config.initial_work_load * (double)config.max_cores / (double)left_cores;
+
+            //To improve both performance and divergence we remove the if(alive[j])
+            //by using the indexes of alive cores instead of if(alive[j])
+
+            tempModel_gpu_coalesced_optimized_v2(neighbours,sim_state,config,distributedLoad,left_cores);
+
+           
+            
+            //-----------Random Walk Step computation-------------------------
+            for (j = 0; j < left_cores; j++) {
+                //Random  is in range [0 : currR[j]]
+                int index = GETINDEX(j,tid,config.num_of_tests);
+                random =(double)curand_uniform(&states[tid])* currR[index]; //current core will potentially die when its R will be equal to random. drand48() generates a number in the interval [0.0;1.0)
+                double alpha = getAlpha(temps[index]);
+                t = alpha * pow(-log(random), (double) 1 / BETA); //elapsed time from 0 to obtain the new R value equal to random
+                eqT = alpha * pow(-log(currR[index]), (double) 1 / BETA); //elapsed time from 0 to obtain the previous R value
+                t = t - eqT;
+
+                if (minIndex == -1 || (minIndex != -1 && t < stepT)) {
+                    actualMinIndex = indexes[index];
+                    minIndex = j;//Set new minimum index
+                    stepT = t;   //set new minimum time as timeStep
+                    //CUDA_DEBUG_MSG("Min selection : %d con stepT = %f\n",minIndex,stepT);
+                } //TODO ADD A CHECK ON MULTIPLE FAILURE IN THE SAME INSTANT OF TIME.
+            }
+            //CUDA_DEBUG_MSG("MORTO CORE: %d con stepT = %f\n",minIndex,stepT);
+
+            neighbours->notify_core_death(config,actualMinIndex,offset);
+
+            //---------UPDATE TOTAL TIME-----------------
+            //Current simulation time
+            partial_sumTTF[threadIdx.x] = partial_sumTTF[threadIdx.x] + stepT;
+            //totalTime = totalTime + stepT;
+            //---------UPDATE Configuration-----------------
+            if (left_cores > config.min_cores) {
+                //Swap all cells
+               
+                swapStateOptimized(sim_state,minIndex,left_cores,config.num_of_tests);
+
+
+                // compute remaining reliability for working cores
+                for (j = 0; j < left_cores; j++) {
+                    int index = GETINDEX(j,tid,config.num_of_tests); //Current alive core
+                    double alpha = getAlpha(temps[index]);
+                    eqT = alpha * pow(-log(currR[index]), (double) 1 / BETA); //TODO: fixed a buf. we have to use the eqT of the current unit and not the one of the failed unit
+                    currR[index] = exp(-pow((stepT + eqT) / alpha, BETA));
+                }
+            }
+            //Set Load of lastly dead core to 0
+            left_cores--; //Reduce number of alive core in this simulation
+        }//END SIMULATION-----------------------------
+        //Sync the threads
+        __syncthreads();
+
+        //Acccumulate the results of this block
+        accumulate<float>(partial_sumTTF,blockDim.x,config.num_of_tests);
+
+        //Add the partial result of this block to the final result
+        __syncthreads();
+        if(threadIdx.x == 0){
+            //atomicAdd(&(sumTTF_res[0]),partial_sumTTF[0]);
+            //USING ATOMIC ADD-> SAME RESULT AS CPU, WITH GLOBAL REDUCE.... NOT:.. CHECK WHY
+
+            //Each Thread 0 assign to his block cell the result of its accumulate
+            sumTTF_res[blockIdx.x] = partial_sumTTF[0]; //Each block save its result in its "ID"
+        }
+
+        //TODO ACCUMULATE ALSO SUMTTFx2
+
+    }
+}
 //----------------------------------------------------------------------------------
 //-----------STRUCT VERSION------------------------------------------------------
 //-Basic parallel reduction + Swap optimization to avoid non relevant computation---
@@ -1658,6 +1802,16 @@ void montecarlo_simulation_cuda_launcher(configuration_description* config,doubl
     else if (config->gpu_version == VERSION_COALESCED_OPTIMIZED){
         printf("COALESCED OPT\n");//DA FIXARE PROBABILMENTE, RISULTATO VIENE NAN
         montecarlo_simulation_cuda_redux_coalesced<true><<<blocksPerGrid,threadsPerBlock,config->block_dim*sizeof(float)>>>(sim_state,*config,sumTTF_GPU,sumTTFx2_GPU);
+        CHECK_KERNELCALL();
+        cudaDeviceSynchronize();
+    }else if (config->gpu_version == VERSION_COALESCED_OPTIMIZED_v2){
+        Core_neighbourhood_v2* neighbours = Core_neighbourhood_v2::factory_neighbours(config->max_cores * config->num_of_tests);
+        montecarlo_simulation_cuda_redux_coalesced_opt<Core_neighbourhood_v2><<<blocksPerGrid,threadsPerBlock,config->block_dim*sizeof(float)>>>(sim_state,*config,neighbours,sumTTF_GPU,sumTTFx2_GPU);
+        CHECK_KERNELCALL();
+        cudaDeviceSynchronize();
+    }else if (config->gpu_version == VERSION_COALESCED_OPTIMIZED_v3){
+        Core_neighbourhood_v3* neighbours = Core_neighbourhood_v3::factory_neighbours(config->max_cores * config->num_of_tests);
+        montecarlo_simulation_cuda_redux_coalesced_opt<Core_neighbourhood_v3><<<blocksPerGrid,threadsPerBlock,config->block_dim*sizeof(float)>>>(sim_state,*config,neighbours,sumTTF_GPU,sumTTFx2_GPU);
         CHECK_KERNELCALL();
         cudaDeviceSynchronize();
     }
