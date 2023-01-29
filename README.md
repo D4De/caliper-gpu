@@ -1,5 +1,5 @@
 # Caliper-GPU-version
-nvprof --metrics gld_efficiency --metrics gst_efficiency --metrics sm_efficiency --metrics branch_efficiency --metrics achieved_occupancy --metrics warp_nonpred_execution_efficiency ./gpu_exec 10 10 50 0.5 -g 1
+nvprof --csv --log-file ./bench/redux.csv --metrics gld_efficiency --metrics gst_efficiency --metrics sm_efficiency --metrics branch_efficiency --metrics achieved_occupancy --metrics warp_nonpred_execution_efficiency ./gpu_exec 10 10 50 0.5 -g 1
 
 
 ## Parameters:
