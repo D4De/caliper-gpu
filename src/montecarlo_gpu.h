@@ -1094,13 +1094,17 @@ __global__ void prob_to_death(simulation_state sim_state, configuration_descript
     
     if(core_id < config.max_cores && walk_id < config.num_of_tests){
         int global_id = walk_id*config.max_cores + core_id;
-        core_state s = sim_state.core_states[global_id];
+        core_state* s = &sim_state.core_states[global_id];
+
+        if(s->alive){
+            tempModel_gpu_grid(sim_state, config, core_id, walk_id);
+        }
         
         curandState_t *states = sim_state.rand_states;
-        double random = (double)curand_uniform(&states[global_id])* s.curr_r; //current core will potentially die when its R will be equal to random. drand48() generates a number in the interval [0.0;1.0)
-        double alpha = getAlpha(s.temp);
+        double random = (double)curand_uniform(&states[global_id])* s->curr_r; //current core will potentially die when its R will be equal to random. drand48() generates a number in the interval [0.0;1.0)
+        double alpha = getAlpha(s->temp);
         double t = alpha * pow(-log(random), (double) 1 / BETA); //elapsed time from 0 to obtain the new R value equal to random
-        double eqT = alpha * pow(-log(s.curr_r), (double) 1 / BETA); //elapsed time from 0 to obtain the previous R value
+        double eqT = alpha * pow(-log(s->curr_r), (double) 1 / BETA); //elapsed time from 0 to obtain the previous R value
 
         sim_state.times[global_id]= (float)(t - eqT);
         
@@ -1138,8 +1142,7 @@ __global__ void grid_update_state(simulation_state sim_state, configuration_desc
             s->load = distributedLoad;
         }
         __syncthreads();
-        if(s->alive)
-            tempModel_gpu_grid(sim_state, config, core_id, walk_id);
+        
         
         if(core_id == 0){
             partial_sumTTF[walk_id] += stepT;
@@ -1157,7 +1160,7 @@ __global__ void init_grid(simulation_state sim_state, configuration_description 
     sim_state.core_states[index].load = config.initial_work_load;
     sim_state.core_states[index].curr_r = 1.0;
     sim_state.core_states[index].alive = true;
-    tempModel_gpu_grid(sim_state, config, core_id, walk_id);
+    //tempModel_gpu_grid(sim_state, config, core_id, walk_id);
     }
     if(core_id == 0)
         sumTTF[walk_id] = 0;
@@ -1742,6 +1745,8 @@ void montecarlo_simulation_cuda_launcher(configuration_description* config,doubl
         dim3 blocksPerGrid1(num_of_blocks,num_of_blocks2D,1);
         dim3 threadsPerBlock1(config->block_dim,config->block_dim,1);
         init_grid<<<blocksPerGrid1, threadsPerBlock1>>>(sim_state, *config, TTF_GPU);
+        CHECK_KERNELCALL();
+        cudaDeviceSynchronize();
 
         for(int i = config->max_cores; i >= config->min_cores; i--){
         //random step + partial min
