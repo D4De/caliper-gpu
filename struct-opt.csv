@@ -1,0 +1,24 @@
+==10954== NVPROF is profiling process 10954, command: ./gpu_exec 10 10 50 0.5 -g 6
+==10954== Some kernel(s) will be replayed on device 0 in order to collect all events/metrics.
+==10954== Profiling application: ./gpu_exec 10 10 50 0.5 -g 6
+==10954== Profiling result:
+==10954== Metric result:
+"Device","Kernel","Invocations","Metric Name","Metric Description","Min","Max","Avg"
+"NVIDIA GeForce MX130 (0)","collect_res_gpu_grid(float*, float*, int)",1,"gld_efficiency","Global Memory Load Efficiency",99.904092%,99.904092%,99.904092%
+"NVIDIA GeForce MX130 (0)","collect_res_gpu_grid(float*, float*, int)",1,"gst_efficiency","Global Memory Store Efficiency",12.500000%,12.500000%,12.500000%
+"NVIDIA GeForce MX130 (0)","collect_res_gpu_grid(float*, float*, int)",1,"sm_efficiency","Multiprocessor Activity",18.770703%,18.770703%,18.770703%
+"NVIDIA GeForce MX130 (0)","collect_res_gpu_grid(float*, float*, int)",1,"branch_efficiency","Branch Efficiency",99.836601%,99.836601%,99.836601%
+"NVIDIA GeForce MX130 (0)","collect_res_gpu_grid(float*, float*, int)",1,"achieved_occupancy","Achieved Occupancy",0.493342,0.493342,0.493342
+"NVIDIA GeForce MX130 (0)","collect_res_gpu_grid(float*, float*, int)",1,"warp_nonpred_execution_efficiency","Warp Non-Predicated Execution Efficiency",65.484283%,65.484283%,65.484283%
+"NVIDIA GeForce MX130 (0)","init_random_state(unsigned int, int, curandStateXORWOW*)",1,"gld_efficiency","Global Memory Load Efficiency",12.500000%,12.500000%,12.500000%
+"NVIDIA GeForce MX130 (0)","init_random_state(unsigned int, int, curandStateXORWOW*)",1,"gst_efficiency","Global Memory Store Efficiency",21.131474%,21.131474%,21.131474%
+"NVIDIA GeForce MX130 (0)","init_random_state(unsigned int, int, curandStateXORWOW*)",1,"sm_efficiency","Multiprocessor Activity",99.374333%,99.374333%,99.374333%
+"NVIDIA GeForce MX130 (0)","init_random_state(unsigned int, int, curandStateXORWOW*)",1,"branch_efficiency","Branch Efficiency",98.681220%,98.681220%,98.681220%
+"NVIDIA GeForce MX130 (0)","init_random_state(unsigned int, int, curandStateXORWOW*)",1,"achieved_occupancy","Achieved Occupancy",0.495324,0.495324,0.495324
+"NVIDIA GeForce MX130 (0)","init_random_state(unsigned int, int, curandStateXORWOW*)",1,"warp_nonpred_execution_efficiency","Warp Non-Predicated Execution Efficiency",53.757072%,53.757072%,53.757072%
+"NVIDIA GeForce MX130 (0)","montecarlo_simulation_cuda_redux_struct_optimized(simulation_state, configuration_description, float*, float*)",1,"gld_efficiency","Global Memory Load Efficiency",20.198215%,20.198215%,20.198215%
+"NVIDIA GeForce MX130 (0)","montecarlo_simulation_cuda_redux_struct_optimized(simulation_state, configuration_description, float*, float*)",1,"gst_efficiency","Global Memory Store Efficiency",23.809557%,23.809557%,23.809557%
+"NVIDIA GeForce MX130 (0)","montecarlo_simulation_cuda_redux_struct_optimized(simulation_state, configuration_description, float*, float*)",1,"branch_efficiency","Branch Efficiency",99.948547%,99.948547%,99.948547%
+"NVIDIA GeForce MX130 (0)","montecarlo_simulation_cuda_redux_struct_optimized(simulation_state, configuration_description, float*, float*)",1,"achieved_occupancy","Achieved Occupancy",0.062440,0.062440,0.062440
+"NVIDIA GeForce MX130 (0)","montecarlo_simulation_cuda_redux_struct_optimized(simulation_state, configuration_description, float*, float*)",1,"warp_nonpred_execution_efficiency","Warp Non-Predicated Execution Efficiency",94.817651%,94.817651%,94.817651%
+==10954== Warning: One or more events or metrics overflowed. Rerun with "--print-gpu-trace" for detail.
