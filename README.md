@@ -7,8 +7,8 @@ This framework was developed by a Research team in Politecnico di Milano and the
 
 ## How Caliper Works?
 
-Caliper use Montecarlo Algorithm to approximate MTTF integral within a certain "confidence interval".
-On our "Documentation" Slide you can find a more details about it.
+Caliper use Montecarlo Algorithm to approximate MTTF integral within a certain "confidence interval".\
+On our [Documentation Slides](./Documentation/Caliper-Cuda-Presentation.pdf) Slide you can find a more details about it.
 
 ## What have we done?
 
