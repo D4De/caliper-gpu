@@ -15,4 +15,4 @@ On our [Documentation Slides](./Documentation/Caliper-Cuda-Presentation.pdf) you
 As a project for the GPU & Heterogeneous system course, we created a CUDA version of Caliper.
 The final version had a 72x speedup [Intel I5 8thGen w.r.t a Tesla K80 on AWS].
 
-(All the versions we implemented are explained in the slides, together with benchmarks and charts).
+(All the versions we implemented are explained in the [slides](./Documentation/Caliper-Cuda-Presentation.pdf), together with benchmarks and charts).
